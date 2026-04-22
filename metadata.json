@@ -1,0 +1,8 @@
+{
+  "name": "AI Powered Document Expiry Tracker",
+  "description": "AI Tracker is a secure, AI-powered document lifecycle manager. Track expiries, scan IDs with OCR, and receive automated reminders for your critical assets.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ai-doc-expiry-tracker
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: node --loader tsx/esm server.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_API_KEY
+        value: AIzaSyC1W_R3vSxiiSCIkD_oe83xmXWdnRjXAVI
+      - key: RAZORPAY_KEY_ID
+        value: rzp_test_SWC78pM3DZlUME
+      - key: RAZORPAY_KEY_SECRET
+        value: QufwmCmqP07lOPdhMsYTEDGd
+      - key: RAZORPAY_WEBHOOK_SECRET
+        value: my_super_secret_123
+      - key: SMTP_USER
+        value: himansh.cs91@gmail.com
+      - key: SMTP_PASS
+        value: jvyjmqustztbbcho

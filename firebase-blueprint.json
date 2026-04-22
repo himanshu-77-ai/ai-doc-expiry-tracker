@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "Document": {
+      "title": "Document",
+      "description": "A tracked document with expiry information",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Name of the document" },
+        "category": { "type": "string", "description": "Category of the document" },
+        "expiryDate": { "type": "string", "format": "date", "description": "Expiry date in YYYY-MM-DD" },
+        "issueDate": { "type": "string", "format": "date" },
+        "documentNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["Safe", "Expiring Soon", "Expired"] },
+        "fileUrl": { "type": "string", "description": "URL of the document in Storage" },
+        "fileData": { "type": "string", "description": "Backup Base64 data if Storage fails" },
+        "summary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["title", "expiryDate", "userId"]
+    },
+    "User": {
+      "title": "User",
+      "description": "App user profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "plan": { "type": "string", "enum": ["free", "monthly", "yearly"] },
+        "stripeCustomerId": { "type": "string" }
+      },
+      "required": ["email"]
+    }
+  },
+  "firestore": {
+    "/documents/{docId}": {
+      "schema": "Document",
+      "description": "User documents"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    }
+  }
+}
