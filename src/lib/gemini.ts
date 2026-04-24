@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// ✅ FIX: Create fresh client on every call instead of once at startup
+const getAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const extractDocumentInfo = async (base64Image: string, mimeType: string) => {
   console.log("Starting OCR extraction via @google/genai...", { mimeType, base64Length: base64Image.length });
@@ -8,7 +9,10 @@ export const extractDocumentInfo = async (base64Image: string, mimeType: string)
   try {
     const key = process.env.GEMINI_API_KEY;
     if (!key) throw new Error("AI API Key is missing. Please check your configuration.");
+    
+    console.log("API Key loaded, starts with:", key.substring(0, 8));
 
+    const ai = getAI(); // ✅ Fresh client every time
     const fetchPromise = ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: [
@@ -89,6 +93,7 @@ export const chatWithAssistant = async (history: { role: 'user' | 'ai', text: st
       parts: [{ text: msg.text }]
     }));
 
+    const ai = getAI(); // ✅ Fresh client every time
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
       contents: [
