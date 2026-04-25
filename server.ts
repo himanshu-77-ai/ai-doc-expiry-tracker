@@ -1071,7 +1071,7 @@ async function startServer() {
   app.post("/api/notifications/trigger-reminders", async (req, res) => {
     const result = await checkAndSendReminders();
     if (result.success) {
-      res.json(result);
+      res.json({ success: true, sent: result.sentCount || 0, message: "ok" });
     } else {
       res.status(500).json(result);
     }
