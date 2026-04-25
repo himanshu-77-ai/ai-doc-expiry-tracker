@@ -181,11 +181,15 @@ export default function App() {
       const response = await fetch("/api/user/report-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.uid,
-          expiryInterval,
-          ...reportSettings
-        })
+        headers: { 
+  "Content-Type": "application/json",
+  "Authorization": `Bearer ${await user.getIdToken()}`
+},
+body: JSON.stringify({
+  userId: user.uid,
+  expiryInterval,
+  ...reportSettings
+})
       });
       if (response.ok) {
         alert("Report schedule updated successfully!");
