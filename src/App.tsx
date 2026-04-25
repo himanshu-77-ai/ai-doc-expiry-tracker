@@ -522,7 +522,7 @@ body: JSON.stringify({
   // Optimized stats and filtering
   const stats = useMemo(() => ({
     total: documents.length,
-    safe: documents.filter(d => d.status === 'Renewed' || getStatus(d.expiryDate) === 'Safe').length,
+    safe: documents.filter(d => d.status === 'Renewed' && getStatus(d.expiryDate) !== 'Expired' || getStatus(d.expiryDate) === 'Safe').length,
     expiring: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expiring Soon').length,
     expired: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expired').length,
   }), [documents, getStatus]);
