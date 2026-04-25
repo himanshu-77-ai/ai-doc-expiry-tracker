@@ -639,7 +639,7 @@ async function startServer() {
       res.json(settings.exists ? settings.data() : { upiId: "himansh.cs91@okhdfcbank", upiName: "himanshuu yadav" });
     } catch (err) {
       // Fallback for restricted environments
-      res.json({ upiId: "himansh.cs91@okhdfcbank", upiName: "himanshuu yadav" });
+      res.json({ upiId: "himansh.cs91@okhdfcbank", upiName: "AI Doc Expiry Tracker" });
     }
   });
 
