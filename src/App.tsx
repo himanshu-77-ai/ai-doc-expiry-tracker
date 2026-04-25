@@ -180,7 +180,6 @@ export default function App() {
     try {
       const response = await fetch("/api/user/report-settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         headers: { 
   "Content-Type": "application/json",
   "Authorization": `Bearer ${await user.getIdToken()}`
