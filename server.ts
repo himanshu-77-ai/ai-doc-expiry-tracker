@@ -1077,15 +1077,14 @@ async function startServer() {
     }
   });
 
+  // Lightweight ping for cron-job.org
+  app.post("/api/ping/reminders", async (req, res) => {
+    checkAndSendReminders().catch(console.error);
+    res.json({ ok: true });
+  });
+
   // Manual Trigger for Testing Scheduled Reports
   app.post("/api/notifications/trigger-reports", async (req, res) => {
-    try {
-      await checkScheduledReports();
-      res.json({ success: true, message: "Scheduled reports check triggered" });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 
     // Test Email
     app.post("/api/notifications/test-email", async (req, res) => {
