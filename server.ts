@@ -339,6 +339,13 @@ async function startServer() {
     return razorpayInstance;
   }
 
+  // ============================================================
+  // FIX #1: Simple health check endpoint for cron keep-alive
+  // ============================================================
+  app.get("/api/health", (req, res) => {
+    res.status(200).send("ok");
+  });
+
   // Debug Route for Firebase
   app.get("/api/debug/firebase", async (req, res) => {
     try {
@@ -1077,10 +1084,18 @@ async function startServer() {
     }
   });
 
-  // Lightweight ping for cron-job.org
-  app.post("/api/ping/reminders", async (req, res) => {
-    checkAndSendReminders().catch(console.error);
-    res.json({ ok: true });
+  // ============================================================
+  // FIX #2: Lightweight ping for cron-job.org (accept GET/POST, immediate tiny response)
+  // ============================================================
+  app.all("/api/ping/reminders", async (req, res) => {
+    // Send response immediately (tiny text) to avoid "output too large"
+    res.setHeader("Content-Type", "text/plain");
+    res.status(200).send("ok");
+    
+    // Run reminders in background without waiting
+    setImmediate(() => {
+      checkAndSendReminders().catch(console.error);
+    });
   });
 
   // Manual Trigger for Testing Scheduled Reports
