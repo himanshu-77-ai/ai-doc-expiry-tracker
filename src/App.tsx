@@ -504,7 +504,7 @@ body: JSON.stringify({
     return getDynamicStatus(expiryDate, expiryInterval ?? 30);
   }, [expiryInterval]);
 
-  const handleRenew = async (docObj: Document) => {
+ const handleRenew = async (docObj: Document) => {
     try {
       if (!user) return;
       const newExpiry = prompt(
