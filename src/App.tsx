@@ -507,12 +507,22 @@ body: JSON.stringify({
   const handleRenew = async (docObj: Document) => {
     try {
       if (!user) return;
-      console.log(`Renewing document: ${docObj.title}`);
+      const newExpiry = prompt(
+        `Enter new expiry date for "${docObj.title}" (YYYY-MM-DD):`,
+        ""
+      );
+      if (!newExpiry) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) {
+        alert("Invalid format! Use YYYY-MM-DD (e.g. 2027-04-25)");
+        return;
+      }
       const docRef = doc(db, "documents", docObj.id);
       await updateDoc(docRef, {
         status: 'Renewed',
+        expiryDate: newExpiry,
         updatedAt: serverTimestamp()
       });
+      alert(`Renewed! New expiry: ${newExpiry}`);
     } catch (err) {
       console.error("Renew error:", err);
       setError("Failed to mark document as renewed.");
