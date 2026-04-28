@@ -679,7 +679,7 @@ async function startServer() {
     try {
       if (!db) throw new Error("DB not ready");
       const settings = await db.collection("settings").doc("payment").get();
-      res.json(settings.exists ? settings.data() : { upiId: "himansh.cs91@okhdfcbank", upiName: "himanshuu yadav" });
+      res.json(settings.exists ? settings.data() : { upiId: "himansh.cs91@okhdfcbank", upiName: "AI Doc Tracker" });
     } catch (err) {
       // Fallback for restricted environments
       res.json({ upiId: "himansh.cs91@okhdfcbank", upiName: "AI Doc Expiry Tracker" });
