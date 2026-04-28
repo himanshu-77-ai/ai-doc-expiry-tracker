@@ -19,6 +19,10 @@ import crypto from "crypto";
 
 dotenv.config();
 
+// Set DEBUG=true in .env to see verbose logs. Default: false (keeps cron-job.org output small)
+const DEBUG = process.env.DEBUG === "true";
+const log = (...args: any[]) => { if (DEBUG) console.log(...args); };
+
 // Initialize Stripe lazily
 let stripe: Stripe | null = null;
 const getStripe = () => {
@@ -303,6 +307,18 @@ async function startServer() {
 
   app.use(express.json());
 
+  // ============================================================
+  // KEEP-ALIVE & HEALTH — cron-job.org ke liye (NO rate limit)
+  // Render free tier pe 429 se bachne ke liye: BEFORE all middleware
+  // Cron-job.org mein ye 2 URLs use karo:
+  //   Keep Alive:  GET  /api/health      (har 14 min)
+  //   Reminders:   POST /api/ping/reminders (daily 9 AM)
+  // ============================================================
+  app.get("/api/health", (_req, res) => {
+    res.status(200).json({ ok: true, ts: Date.now(), uptime: process.uptime() });
+  });
+  app.head("/api/health", (_req, res) => res.status(200).end()); // some monitors use HEAD
+
   // Helper to get fresh firebase config
   const getFirebaseConfig = () => {
     try {
@@ -338,13 +354,6 @@ async function startServer() {
     }
     return razorpayInstance;
   }
-
-  // ============================================================
-  // FIX #1: Simple health check endpoint for cron keep-alive
-  // ============================================================
-  app.get("/api/health", (req, res) => {
-    res.status(200).send("ok");
-  });
 
   // Debug Route for Firebase
   app.get("/api/debug/firebase", async (req, res) => {
@@ -969,23 +978,21 @@ async function startServer() {
 
   // Reminder Logic
   async function checkAndSendReminders() {
-    console.log(`[Reminders] Starting expiry check at ${new Date().toISOString()}`);
+    log(`[Reminders] Starting expiry check at ${new Date().toISOString()}`);
     
     const transporter = createTransporter();
     if (!transporter) {
-      console.warn("[Reminders] SMTP credentials missing. Reminders aborted.");
+      console.error("[Reminders] SMTP credentials missing. Reminders aborted.");
       return { success: false, error: "SMTP not configured" };
     }
 
     try {
-      console.log("[Reminders] Verifying SMTP connection...");
       await transporter.verify();
-      console.log("[Reminders] SMTP connection verified.");
+      log("[Reminders] SMTP verified.");
 
       const now = new Date();
       const todayString = now.toISOString().split('T')[0];
       
-      // Step 1: Fetch all users to check their individual settings
       let allUsers: any[] = [];
       try {
         if (db) {
@@ -996,15 +1003,12 @@ async function startServer() {
         }
       } catch (err) {
         console.error("[Reminders] Failed to fetch users:", err);
-        // Fallback: strictly check documents if users fetch fails?
-        // Let's try to proceed with at least the default 30, 7, 1 if we can't get preferences
       }
 
-      console.log(`[Reminders] Processing ${allUsers.length} users for custom expiry checks`);
+      log(`[Reminders] Processing ${allUsers.length} users`);
       let sentCount = 0;
 
       for (const user of allUsers) {
-        // Default to [30, 7, 1] if no setting found
         const interval = parseInt(user.expiryInterval || "30");
         const triggerDays = [...new Set([interval, 7, 1])].sort((a, b) => b - a);
         
@@ -1031,11 +1035,10 @@ async function startServer() {
             continue;
           }
 
-          // Filter out documents that are already 'Renewed' in status if that field exists
           const eligibleDocs = docs.filter(d => d.status !== 'Renewed');
 
           for (const doc of eligibleDocs) {
-            console.log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
+            log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
             try {
               await transporter.sendMail({
                 from: `"AI Tracker Reminders" <${process.env.SMTP_USER}>`,
@@ -1066,7 +1069,7 @@ async function startServer() {
         }
       }
 
-      console.log(`[Reminders] Completed. Total reminders sent: ${sentCount}`);
+      console.log(`[Reminders] Done. Sent: ${sentCount}`);
       return { success: true, sentCount };
     } catch (error: any) {
       console.error("[Reminders] Critical failure:", error);
@@ -1084,19 +1087,26 @@ async function startServer() {
     }
   });
 
-  // ============================================================
-  // FIX #2: Lightweight ping for cron-job.org (accept GET/POST, immediate tiny response)
-  // ============================================================
-  app.all("/api/ping/reminders", async (req, res) => {
-    // Send response immediately (tiny text) to avoid "output too large"
-    res.setHeader("Content-Type", "text/plain");
-    res.status(200).send("ok");
-    
-    // Run reminders in background without waiting
+  // Lightweight ping for cron-job.org
+  // IMPORTANT: res.json() FIRST to avoid "output too large" error on cron-job.org
+  app.post("/api/ping/reminders", (req, res) => {
+    res.json({ ok: true }); // Respond immediately — do NOT await
     setImmediate(() => {
       checkAndSendReminders().catch(console.error);
     });
   });
+
+  // GET version for keep-alive pings (some cron services use GET)
+  app.get("/api/ping/reminders", (req, res) => {
+    res.json({ ok: true });
+    setImmediate(() => {
+      checkAndSendReminders().catch(console.error);
+    });
+  });
+
+  // Simple keep-alive ping (no logic) — use this for the "Keep Alive" cronjob
+  app.get("/api/ping", (req, res) => res.json({ ok: true, ts: Date.now() }));
+  app.post("/api/ping", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
   // Manual Trigger for Testing Scheduled Reports
   app.post("/api/notifications/trigger-reports", async (req, res) => {
@@ -1628,49 +1638,34 @@ async function startServer() {
     const now = new Date();
     const currentHour = now.getHours().toString().padStart(2, '0');
     const currentMinute = now.getMinutes().toString().padStart(2, '0');
-    console.log(`[Cron] Starting scheduled reports check at ${currentHour}:${currentMinute} (UTC: ${now.toISOString()})`);
+    log(`[Cron] Check at ${currentHour}:${currentMinute} UTC`);
 
     try {
       let users: any[] = [];
       const tryFetchUsers = async () => {
-        // Method 1: Admin SDK
         try {
           if (db) {
-            console.log("[Cron] Fetching users via Admin SDK...");
             const usersSnapshot = await db.collection("users").where("reportSettings.frequency", "!=", "none").get();
             const fetched = usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            console.log(`[Cron] Admin SDK found ${fetched.length} users with active report settings`);
-            // We still proceed to REST if Admin SDK returns nothing because it might be a DB ID mismatch
             if (fetched.length > 0) return fetched;
           }
         } catch (e: any) {
-          console.info(`[Cron] Admin SDK user fetch failed: ${e.message}`);
+          log(`[Cron] Admin SDK fetch failed: ${e.message}`);
         }
 
-        // Method 2: REST API
         const tryRest = async (dbId: string) => {
           try {
-            console.log(`[Cron] Attempting REST fetch for ALL users (DB: ${dbId}) to process schedules...`);
             const fetched = await firestoreRest("users", { useDefaultDb: dbId === "(default)" });
-            console.log(`[Cron] REST fetch found ${fetched?.length || 0} total users in DB ${dbId}`);
             return fetched || [];
           } catch (e: any) {
-            console.info(`[Cron] REST fetch failed for DB ${dbId}: ${e.message}`);
-            // Force fallback to (default) REST if named failed for ANY error
             if (dbId !== "(default)") {
-              try {
-                console.log("[Cron] Retrying REST fetch on (default) DB...");
-                return await firestoreRest("users", { useDefaultDb: true });
-              } catch (e2: any) {
-                console.error("[Cron] All REST attempts failed:", e2.message);
-              }
+              try { return await firestoreRest("users", { useDefaultDb: true }); } catch {}
             }
             return [];
           }
         };
 
-        let fetched = await tryRest(databaseId);
-        return fetched;
+        return await tryRest(databaseId);
       };
 
       users = await tryFetchUsers();
@@ -1680,52 +1675,32 @@ async function startServer() {
         return s && s.frequency !== "none" && s.time;
       });
 
-      console.log(`[Cron] Found ${eligibleUsers.length} users with frequency != 'none' for processing.`);
-
       for (const user of eligibleUsers) {
         const settings = user.reportSettings;
         const [targetH, targetM] = settings.time.split(":");
-        
-        // Use inclusive matching if needed, but for now exact minute is safer to avoid duplicates
-        // if the cron runs exactly every minute.
-        console.log(`[Cron] Target time comparison for user ${user.id}: Target ${targetH}:${targetM} vs Current ${currentHour}:${currentMinute} (UTC)`);
-        
         if (targetH !== currentHour || targetM !== currentMinute) continue;
 
-        console.log(`[Cron] User ${user.id} (${user.email}) matches target time ${settings.time}. Checking frequency: ${settings.frequency}`);
-
         const lastSent = settings.lastSent ? new Date(settings.lastSent) : null;
-        let shouldSend = false;
+        let shouldSend = !lastSent;
 
-        if (!lastSent) {
-          console.log(`[Cron] User ${user.id} has never received a report. Sending now.`);
-          shouldSend = true;
-        } else {
-          const diffMs = now.getTime() - lastSent.getTime();
-          const diffDays = diffMs / (1000 * 60 * 60 * 24);
-          
+        if (lastSent) {
+          const diffDays = (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60 * 24);
           if (settings.frequency === "daily" && diffDays >= 0.9) shouldSend = true;
           else if (settings.frequency === "weekly" && diffDays >= 6.9) shouldSend = true;
           else if (settings.frequency === "monthly" && diffDays >= 27.9) shouldSend = true;
-          
-          if (shouldSend) {
-            console.log(`[Cron] User ${user.id} last sent ${lastSent.toISOString()} (${diffDays.toFixed(2)} days ago). Sending ${settings.frequency} report.`);
-          } else {
-            console.log(`[Cron] User ${user.id} not due yet (diffDays: ${diffDays.toFixed(2)} for ${settings.frequency} frequency)`);
-          }
         }
 
         if (shouldSend) {
           try {
             await sendScheduledReport(user.id, user.email, user.expiryInterval);
-            console.log(`[Cron] Successfully processed scheduled report for ${user.email}`);
+            console.log(`[Cron] Report sent to ${user.email}`);
           } catch (err: any) {
-            console.error(`[Cron] Failed to send scheduled report for ${user.id}:`, err.message);
+            console.error(`[Cron] Report failed for ${user.id}:`, err.message);
           }
         }
       }
     } catch (e: any) {
-      console.error("[Cron] Scheduled reports logic check failed:", e.message);
+      console.error("[Cron] Failed:", e.message);
     }
   }
 
