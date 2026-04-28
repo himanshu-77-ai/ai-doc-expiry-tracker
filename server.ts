@@ -794,24 +794,29 @@ async function startServer() {
   // Helper to get service account token using google-auth-library
   async function getServiceAccountToken() {
     try {
-      const auth = new GoogleAuth({
-        scopes: [
-          'https://www.googleapis.com/auth/datastore',
-          'https://www.googleapis.com/auth/cloud-platform',
-          'https://www.googleapis.com/auth/userinfo.email',
-          'https://www.googleapis.com/auth/firebase.database'
-        ]
-      });
-      const client = await auth.getClient();
-      const tokenResponse = await client.getAccessToken();
-      if (!tokenResponse.token) {
-        console.warn("[Firebase] Token response empty");
-      } else {
-        console.log("[Firebase] Successfully retrieved service account access token");
+      const scopes = [
+        'https://www.googleapis.com/auth/datastore',
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/firebase.database'
+      ];
+
+      // Use service account JSON from env if available (Render)
+      if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        const credentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+        const tokenAuth = new GoogleAuth({ credentials, scopes });
+        const client = await tokenAuth.getClient();
+        const tokenResponse = await client.getAccessToken();
+        return tokenResponse.token || null;
       }
-      return tokenResponse.token;
+
+      // Fallback: ADC (local dev)
+      const tokenAuth = new GoogleAuth({ scopes });
+      const client = await tokenAuth.getClient();
+      const tokenResponse = await client.getAccessToken();
+      return tokenResponse.token || null;
     } catch (e: any) {
-      console.warn("[Firebase] Could not get service account token:", e.message);
+      log("[Firebase] Could not get service account token:", e.message);
       return null;
     }
   }
