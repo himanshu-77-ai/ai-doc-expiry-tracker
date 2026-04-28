@@ -9,43 +9,41 @@ import cron from "node-cron";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import { GoogleAuth } from "google-auth-library";
-
-// Load service account from env variable (Render) or file (local)
-function getServiceAccountCredential() {
-  try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      return admin.credential.cert(parsed);
-    }
-  } catch (e) {
-    console.error("[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e);
-  }
-  // Fallback to ADC (local dev)
-  return admin.credential.applicationDefault();
-}
-
-const serviceAccountForAuth = (() => {
-  try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    }
-  } catch (e) {}
-  return null;
-})();
-
-const auth = serviceAccountForAuth
-  ? new GoogleAuth({
-      credentials: serviceAccountForAuth,
-      scopes: ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/datastore"]
-    })
-  : new GoogleAuth({
-      scopes: ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/datastore"]
-    });
 import { readFileSync } from "fs";
 import Stripe from "stripe";
 import crypto from "crypto";
 
 dotenv.config();
+
+// ─── SERVICE ACCOUNT HELPERS ───────────────────────────────────────────
+function getServiceAccountCredential() {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      return admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON));
+    }
+  } catch (e: any) {
+    console.error("[Firebase] Bad FIREBASE_SERVICE_ACCOUNT_JSON:", e.message);
+  }
+  return admin.credential.applicationDefault();
+}
+
+const SA_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/datastore",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/firebase.database"
+];
+
+function buildGoogleAuth() {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      return new GoogleAuth({ credentials: JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON), scopes: SA_SCOPES });
+    }
+  } catch (e) {}
+  return new GoogleAuth({ scopes: SA_SCOPES });
+}
+
+const auth = buildGoogleAuth();
 
 // Set DEBUG=true in .env to see verbose logs. Default: false (keeps cron-job.org output small)
 const DEBUG = process.env.DEBUG === "true";
@@ -137,7 +135,7 @@ async function startServer() {
       await Promise.all(admin.apps.map(app => app?.delete()));
     }
     
-    // Initialize Admin SDK — uses FIREBASE_SERVICE_ACCOUNT_JSON if available
+    // Initialize Admin SDK — uses FIREBASE_SERVICE_ACCOUNT_JSON if set
     const firebaseApp = admin.initializeApp({
       projectId: projectId,
       credential: getServiceAccountCredential()
@@ -334,17 +332,21 @@ async function startServer() {
 
   app.use(express.json());
 
-  // ============================================================
-  // KEEP-ALIVE & HEALTH — cron-job.org ke liye (NO rate limit)
-  // Render free tier pe 429 se bachne ke liye: BEFORE all middleware
-  // Cron-job.org mein ye 2 URLs use karo:
-  //   Keep Alive:  GET  /api/health      (har 14 min)
-  //   Reminders:   POST /api/ping/reminders (daily 9 AM)
-  // ============================================================
-  app.get("/api/health", (_req, res) => {
-    res.status(200).json({ ok: true, ts: Date.now(), uptime: process.uptime() });
+  // ── KEEP-ALIVE & HEALTH (cron-job.org) ──────────────────────────────────
+  // Keep Alive job:  GET  /api/health        every 10 min
+  // Reminders job:   POST /api/ping/reminders daily 9 AM
+  app.get("/api/health", (_req, res) => res.json({ ok: true, ts: Date.now(), uptime: process.uptime() }));
+  app.head("/api/health", (_req, res) => res.status(200).end());
+  app.get("/api/ping", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+  app.post("/api/ping", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+  app.post("/api/ping/reminders", (req, res) => {
+    res.json({ ok: true });
+    setImmediate(() => { checkAndSendReminders().catch(console.error); });
   });
-  app.head("/api/health", (_req, res) => res.status(200).end()); // some monitors use HEAD
+  app.get("/api/ping/reminders", (req, res) => {
+    res.json({ ok: true });
+    setImmediate(() => { checkAndSendReminders().catch(console.error); });
+  });
 
   // Helper to get fresh firebase config
   const getFirebaseConfig = () => {
@@ -682,7 +684,7 @@ async function startServer() {
       res.json(settings.exists ? settings.data() : { upiId: "himansh.cs91@okhdfcbank", upiName: "AI Doc Tracker" });
     } catch (err) {
       // Fallback for restricted environments
-      res.json({ upiId: "himansh.cs91@okhdfcbank", upiName: "AI Doc Expiry Tracker" });
+      res.json({ upiId: "himansh.cs91@okhdfcbank", upiName: "AI Doc Tracker" });
     }
   });
 
@@ -695,18 +697,12 @@ async function startServer() {
       }
       // REST fallback
       const saToken = await getServiceAccountToken();
-      if (!saToken) throw new Error("No auth token");
-      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/settings/payment`;
-      const body = {
-        fields: {
-          upiId: { stringValue: upiId },
-          upiName: { stringValue: upiName }
-        }
-      };
-      const r = await fetch(`${url}?updateMask.fieldPaths=upiId&updateMask.fieldPaths=upiName`, {
+      if (!saToken) throw new Error("No auth token available");
+      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/settings/payment?updateMask.fieldPaths=upiId&updateMask.fieldPaths=upiName`;
+      const r = await fetch(url, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${saToken}` },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ fields: { upiId: { stringValue: upiId }, upiName: { stringValue: upiName } } })
       });
       if (!r.ok) throw new Error(`REST failed: ${r.status}`);
       res.json({ success: true });
@@ -794,29 +790,12 @@ async function startServer() {
   // Helper to get service account token using google-auth-library
   async function getServiceAccountToken() {
     try {
-      const scopes = [
-        'https://www.googleapis.com/auth/datastore',
-        'https://www.googleapis.com/auth/cloud-platform',
-        'https://www.googleapis.com/auth/userinfo.email',
-        'https://www.googleapis.com/auth/firebase.database'
-      ];
-
-      // Use service account JSON from env if available (Render)
-      if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-        const credentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-        const tokenAuth = new GoogleAuth({ credentials, scopes });
-        const client = await tokenAuth.getClient();
-        const tokenResponse = await client.getAccessToken();
-        return tokenResponse.token || null;
-      }
-
-      // Fallback: ADC (local dev)
-      const tokenAuth = new GoogleAuth({ scopes });
+      const tokenAuth = buildGoogleAuth();
       const client = await tokenAuth.getClient();
       const tokenResponse = await client.getAccessToken();
       return tokenResponse.token || null;
     } catch (e: any) {
-      log("[Firebase] Could not get service account token:", e.message);
+      console.warn("[Firebase] Could not get service account token:", e.message);
       return null;
     }
   }
@@ -1137,27 +1116,6 @@ async function startServer() {
       res.status(500).json(result);
     }
   });
-
-  // Lightweight ping for cron-job.org
-  // IMPORTANT: res.json() FIRST to avoid "output too large" error on cron-job.org
-  app.post("/api/ping/reminders", (req, res) => {
-    res.json({ ok: true }); // Respond immediately — do NOT await
-    setImmediate(() => {
-      checkAndSendReminders().catch(console.error);
-    });
-  });
-
-  // GET version for keep-alive pings (some cron services use GET)
-  app.get("/api/ping/reminders", (req, res) => {
-    res.json({ ok: true });
-    setImmediate(() => {
-      checkAndSendReminders().catch(console.error);
-    });
-  });
-
-  // Simple keep-alive ping (no logic) — use this for the "Keep Alive" cronjob
-  app.get("/api/ping", (req, res) => res.json({ ok: true, ts: Date.now() }));
-  app.post("/api/ping", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
   // Manual Trigger for Testing Scheduled Reports
   app.post("/api/notifications/trigger-reports", async (req, res) => {
