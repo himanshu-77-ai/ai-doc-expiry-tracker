@@ -10,9 +10,37 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import { GoogleAuth } from "google-auth-library";
 
-const auth = new GoogleAuth({
-  scopes: ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/datastore"]
-});
+// Load service account from env variable (Render) or file (local)
+function getServiceAccountCredential() {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+      return admin.credential.cert(parsed);
+    }
+  } catch (e) {
+    console.error("[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e);
+  }
+  // Fallback to ADC (local dev)
+  return admin.credential.applicationDefault();
+}
+
+const serviceAccountForAuth = (() => {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    }
+  } catch (e) {}
+  return null;
+})();
+
+const auth = serviceAccountForAuth
+  ? new GoogleAuth({
+      credentials: serviceAccountForAuth,
+      scopes: ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/datastore"]
+    })
+  : new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/datastore"]
+    });
 import { readFileSync } from "fs";
 import Stripe from "stripe";
 import crypto from "crypto";
@@ -74,7 +102,7 @@ async function startServer() {
   let projectId = "";
   let configProjectId = "";
   let apiKey = "";
-  let databaseId = "(default)";
+  let databaseId = process.env.FIREBASE_DATABASE_ID || "(default)";
 
   try {
     const configPath = path.join(process.cwd(), "firebase-applet-config.json");
@@ -109,11 +137,10 @@ async function startServer() {
       await Promise.all(admin.apps.map(app => app?.delete()));
     }
     
-    // Initialize Admin SDK with Config Project ID
-    // We try to utilize ADC (Application Default Credentials)
+    // Initialize Admin SDK — uses FIREBASE_SERVICE_ACCOUNT_JSON if available
     const firebaseApp = admin.initializeApp({
       projectId: projectId,
-      credential: admin.credential.applicationDefault()
+      credential: getServiceAccountCredential()
     });
     console.log(`[Firebase] Admin SDK Initialized for ${projectId}`);
 
@@ -123,7 +150,7 @@ async function startServer() {
         // We need to re-initialize admin app if we change project ID
         const tempApp = admin.initializeApp({
           projectId: pId,
-          credential: admin.credential.applicationDefault()
+          credential: getServiceAccountCredential()
         }, `temp-${Date.now()}-${pId}`);
 
         const testDb = (dbId === "(default)" || !dbId) 
@@ -662,10 +689,29 @@ async function startServer() {
   app.post("/api/config/upi", async (req, res) => {
     const { upiId, upiName } = req.body;
     try {
-      if (!db) throw new Error("DB not ready");
-      await db.collection("settings").doc("payment").set({ upiId, upiName }, { merge: true });
+      if (db) {
+        await db.collection("settings").doc("payment").set({ upiId, upiName }, { merge: true });
+        return res.json({ success: true });
+      }
+      // REST fallback
+      const saToken = await getServiceAccountToken();
+      if (!saToken) throw new Error("No auth token");
+      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/settings/payment`;
+      const body = {
+        fields: {
+          upiId: { stringValue: upiId },
+          upiName: { stringValue: upiName }
+        }
+      };
+      const r = await fetch(`${url}?updateMask.fieldPaths=upiId&updateMask.fieldPaths=upiName`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${saToken}` },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) throw new Error(`REST failed: ${r.status}`);
       res.json({ success: true });
-    } catch (err) {
+    } catch (err: any) {
+      console.error("[UPI Save]", err.message);
       res.status(500).json({ error: "Failed to save UPI settings" });
     }
   });
