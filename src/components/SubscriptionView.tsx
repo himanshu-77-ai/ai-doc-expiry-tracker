@@ -32,15 +32,54 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
   const [editableAmount, setEditableAmount] = useState<string>("");
 
   const plans = [
-    { name: "Free", price: "0", features: ["Up to 5 Documents", "Basic Reminders", "Standard Search"] },
-    { name: "Monthly", price: "10", features: ["Unlimited Documents", "AI OCR Scanning", "Priority Reminders", "Excel/PDF Reports", "AI Chat Assistant"], popular: true },
-    { name: "Yearly", price: "100", features: ["All Monthly Features", "2 Months Free", "Priority Support", "Calendar Sync"] },
+    { 
+      name: "Free", 
+      price: "0", 
+      inrPrice: "0",
+      period: "forever",
+      features: [
+        "5 Documents",
+        "Basic Expiry Reminders",
+        "Standard Search",
+        "Email Alerts",
+      ] 
+    },
+    { 
+      name: "Monthly", 
+      price: "5", 
+      inrPrice: "450",
+      period: "month",
+      features: [
+        "10 Documents",
+        "AI OCR Scanning",
+        "Priority Reminders (30, 7, 1 day)",
+        "Excel/PDF Reports",
+        "AI Chat Assistant",
+        "Invite Friends",
+      ], 
+      popular: true 
+    },
+    { 
+      name: "Yearly", 
+      price: "45", 
+      inrPrice: "4050",
+      period: "year",
+      savings: "Save 25%",
+      features: [
+        "50 Documents",
+        "All Monthly Features",
+        "3 Months Free",
+        "Priority Support",
+        "Calendar Sync",
+        "WhatsApp/SMS Alerts",
+        "Custom Reminder Days",
+      ] 
+    },
   ];
 
-  const handlePayment = async (plan: string, usdAmount: number) => {
+  const handlePayment = async (plan: any, usdAmount: number) => {
     setIsProcessing(true);
-    const conversionRate = 90;
-    const inrAmount = usdAmount * conversionRate;
+    const inrAmount = parseInt(plan.inrPrice);
 
     try {
       if (paymentMethod === 'upi') {
@@ -58,7 +97,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
         const response = await fetch("/api/payments/create-checkout-session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planName: plan, amount: usdAmount }),
+          body: JSON.stringify({ planName: plan.name, amount: usdAmount }),
         });
         const session = await response.json();
         if (session.error) throw new Error(session.error);
@@ -90,11 +129,11 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
         amount: order.amount,
         currency: order.currency,
         name: "AI Tracker",
-        description: `${plan} Subscription`,
+        description: `${plan.name} Subscription`,
         order_id: order.id,
         notes: {
           userId: user?.uid,
-          plan: plan
+          plan: plan.name
         },
         handler: function (response: any) {
           alert("Payment Successful! Payment ID: " + response.razorpay_payment_id);
@@ -171,15 +210,23 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
                 MOST POPULAR
               </span>
             )}
+            {(plan as any).savings && (
+              <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full w-fit mb-4">
+                {(plan as any).savings}
+              </span>
+            )}
             <h3 className="text-2xl font-bold mb-2">{plan.name}</h3>
             <div className="flex items-baseline gap-1 mb-1">
               <span className="text-4xl font-bold">${plan.price}</span>
-              <span className="text-gray-500 font-medium">/ {plan.name === 'Yearly' ? 'year' : 'month'}</span>
+              <span className="text-gray-500 font-medium">/ {(plan as any).period}</span>
             </div>
             {plan.price !== "0" && (
-              <p className="text-sm text-gray-400 mb-8">≈ ₹{parseInt(plan.price) * 90}</p>
+              <p className="text-sm text-gray-400 mb-1">≈ ₹{(plan as any).inrPrice} / {(plan as any).period}</p>
             )}
-            {plan.price === "0" && <div className="mb-8" />}
+            {plan.price === "0" && (
+              <p className="text-sm text-gray-400 mb-1">Free forever</p>
+            )}
+            <div className="mb-6" />
             <ul className="space-y-4 mb-8 flex-1">
               {plan.features.map((feature) => (
                 <li key={feature} className="flex items-center gap-3 text-gray-600">
@@ -189,7 +236,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
               ))}
             </ul>
             <button 
-              onClick={() => plan.price !== "0" && handlePayment(plan.name, parseInt(plan.price))}
+              onClick={() => plan.price !== "0" && handlePayment(plan, parseInt(plan.price))}
               disabled={isProcessing && plan.price !== "0"}
               className={cn(
                 "w-full py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2",
