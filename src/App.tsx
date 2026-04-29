@@ -96,6 +96,38 @@ import { ReportsView } from "./components/ReportsView";
 import { Header } from "./components/Header";
 import { ErrorDisplay } from "./components/ErrorDisplay";
 import { PrivacyPolicy, TermsOfService } from "./components/LegalPages";
+import { AdminPanel, ADMIN_UID, PLAN_CONFIG, DEFAULT_FEATURES } from "./components/AdminPanel";
+
+// ── EFFECTIVE PLAN HELPERS ───────────────────────────────────────────────────
+function getEffectivePlan(userData: any): string {
+  if (userData?.adminPlan && (!userData.adminExpiry || new Date(userData.adminExpiry) > new Date())) {
+    return userData.adminPlan;
+  }
+  return userData?.plan || "free";
+}
+
+function getEffectiveDocLimit(userData: any): number {
+  const plan = getEffectivePlan(userData);
+  if (userData?.adminDocLimit != null && (!userData.adminExpiry || new Date(userData.adminExpiry) > new Date())) {
+    return userData.adminDocLimit;
+  }
+  return PLAN_CONFIG[plan as keyof typeof PLAN_CONFIG]?.docLimit ?? 5;
+}
+
+function getEffectiveFeatures(userData: any): Record<string, boolean> {
+  return { ...DEFAULT_FEATURES, ...(userData?.features || {}) };
+}
+
+// ── DATE FORMAT DD-MM-YYYY ───────────────────────────────────────────────────
+export function formatDateDDMMYYYY(dateStr: string): string {
+  if (!dateStr) return "";
+  // Handle YYYY-MM-DD
+  const parts = dateStr.split("-");
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return dateStr;
+}
 import { StatCard, StatusBadge } from "./components/Common";
 
 const base64ToFile = (base64: string, filename: string) => {
@@ -113,6 +145,7 @@ const base64ToFile = (base64: string, filename: string) => {
 export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [user, setUser] = useState<User | null>(null);
+  const [userData, setUserData] = useState<any>(null); // Firestore user doc (plan, features, overrides)
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -430,9 +463,15 @@ body: JSON.stringify({
             photoURL: user.photoURL,
             lastLogin: new Date().toISOString()
           }, { merge: true });
+
+          // Fetch full user data (plan, features, overrides)
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) setUserData(userSnap.data());
         } catch (err) {
           console.error("Failed to sync user profile:", err);
         }
+      } else {
+        setUserData(null);
       }
     });
     
@@ -508,17 +547,23 @@ body: JSON.stringify({
     try {
       if (!user) return;
       const newExpiry = prompt(
-        `Enter new expiry date for "${docObj.title}" (YYYY-MM-DD):`,
+        `"${docObj.title}" ki nayi expiry date enter karo (DD-MM-YYYY):`,
         ""
       );
       if (!newExpiry) return;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) {
-        alert("Invalid format! Use YYYY-MM-DD (e.g. 2027-04-25)");
+      // Accept DD-MM-YYYY and convert to YYYY-MM-DD for storage
+      let storedExpiry = newExpiry;
+      if (/^\d{2}-\d{2}-\d{4}$/.test(newExpiry)) {
+        const [dd, mm, yyyy] = newExpiry.split("-");
+        storedExpiry = `${yyyy}-${mm}-${dd}`;
+      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) {
+        alert("Invalid format! DD-MM-YYYY use karo (e.g. 25-04-2027)");
         return;
       }
       const docRef = doc(db, "documents", docObj.id);
       await updateDoc(docRef, {
         status: 'Renewed',
+        expiryDate: storedExpiry,
         expiryDate: newExpiry,
         updatedAt: serverTimestamp()
       });
@@ -859,13 +904,14 @@ body: JSON.stringify({
   }
 
   return (
-    <div className="flex h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
+    <div className="flex h-svh bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         isSidebarOpen={isSidebarOpen} 
         setIsSidebarOpen={setIsSidebarOpen} 
-        handleLogout={handleLogout} 
+        handleLogout={handleLogout}
+        userId={user?.uid}
       />
 
       {/* Main Content */}
@@ -881,7 +927,7 @@ body: JSON.stringify({
           exportToPDF={exportToPDF}
         />
 
-        <div className="flex-1 overflow-y-auto p-4 lg:p-12">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 lg:p-12">
           <ErrorDisplay error={error} setError={setError} />
           
           {activeTab === "dashboard" && (
@@ -1070,6 +1116,11 @@ body: JSON.stringify({
               expiryInterval={expiryInterval ?? 30}
             />
           )}
+
+          {/* Admin Panel — sirf ADMIN_UID ke liye visible */}
+          {activeTab === "admin" && user?.uid === ADMIN_UID && (
+            <AdminPanel currentUserId={user.uid} />
+          )}
         </div>
       </main>
 
@@ -1111,6 +1162,20 @@ body: JSON.stringify({
         scannedData={scannedData}
         onSave={async (data) => {
           if (!user) return;
+
+          // ── PLAN-BASED DOC LIMIT ─────────────────────────────────
+          const docLimit = getEffectiveDocLimit(userData);
+          const effectivePlanName = getEffectivePlan(userData);
+          if (documents.length >= docLimit) {
+            setError(
+              effectivePlanName === "free"
+                ? `Free plan mein sirf ${docLimit} documents allowed hain. Monthly ya Yearly plan upgrade karein!`
+                : `Aapka ${effectivePlanName} plan ${docLimit} documents tak limited hai. Admin se contact karein.`
+            );
+            return;
+          }
+          // ────────────────────────────────────────────────────────
+
           setIsSavingDoc(true);
           setSaveStage('preparing');
           setError(null);
