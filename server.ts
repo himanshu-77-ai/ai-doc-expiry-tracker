@@ -1862,6 +1862,73 @@ async function startServer() {
   });
 
   // Vite middleware for development
+  // ═══════════════════════════════════════════════════════════════
+  // ADMIN ROUTES — Only accessible by ADMIN_UID
+  // ═══════════════════════════════════════════════════════════════
+  const ADMIN_UID = "v7U6iaF8wpXBLE9m1A3Crbeq5hq2";
+
+  const verifyAdmin = (req: any, res: any): boolean => {
+    const uid = req.headers["x-admin-uid"];
+    if (uid !== ADMIN_UID) {
+      res.status(403).json({ error: "Unauthorized" });
+      return false;
+    }
+    return true;
+  };
+
+  // GET all users
+  app.get("/api/admin/users", async (req, res) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      if (!db) throw new Error("DB not ready");
+      const usersSnap = await db.collection("users").get();
+      const users = await Promise.all(usersSnap.docs.map(async d => {
+        const data = d.data();
+        // Get doc count for each user
+        let docCount = 0;
+        try {
+          const docsSnap = await db!.collection("documents").where("userId", "==", d.id).count().get();
+          docCount = docsSnap.data().count;
+        } catch (e) {}
+        return { id: d.id, ...data, docCount };
+      }));
+      // Sort by lastLogin desc
+      users.sort((a: any, b: any) => {
+        const ta = a.lastLogin ? new Date(a.lastLogin).getTime() : 0;
+        const tb = b.lastLogin ? new Date(b.lastLogin).getTime() : 0;
+        return tb - ta;
+      });
+      res.json(users);
+    } catch (err: any) {
+      console.error("[Admin] Get users failed:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST update user — plan, docLimit, features, note
+  app.post("/api/admin/users/:userId", async (req, res) => {
+    if (!verifyAdmin(req, res)) return;
+    const { userId } = req.params;
+    const { adminPlan, adminDocLimit, adminExpiry, adminNote, features } = req.body;
+    try {
+      if (!db) throw new Error("DB not ready");
+      const updateData: any = {
+        adminPlan:     adminPlan     ?? null,
+        adminDocLimit: adminDocLimit ?? null,
+        adminExpiry:   adminExpiry   ?? null,
+        adminNote:     adminNote     ?? null,
+        features:      features      ?? null,
+        adminUpdatedAt: new Date().toISOString(),
+        adminUpdatedBy: ADMIN_UID,
+      };
+      await db.collection("users").doc(userId).set(updateData, { merge: true });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Admin] Update user failed:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
