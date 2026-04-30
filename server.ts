@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import Razorpay from "razorpay";
 import dotenv from "dotenv";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import cron from "node-cron";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
@@ -78,19 +78,38 @@ function getStatusInfo(expiryDate: string, interval: number = 30) {
   return { text: "Safe", color: "#10B981" };
 }
 
-function createTransporter() {
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  if (!user || !pass) {
-    console.error("[Email] SMTP_USER or SMTP_PASS missing");
+// ── EMAIL via Resend ─────────────────────────────────────────────────────────
+function getResend() {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    console.error("[Email] RESEND_API_KEY missing");
     return null;
   }
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: { user, pass },
-    debug: true,
-    logger: true
+  return new Resend(key);
+}
+
+// Unified send function — drop-in replacement for transporter.sendMail()
+async function sendEmail({ from, to, subject, html, text }: {
+  from?: string;
+  to: string;
+  subject: string;
+  html?: string;
+  text?: string;
+}) {
+  const resend = getResend();
+  if (!resend) throw new Error("RESEND_API_KEY not configured");
+
+  const fromAddr = from || `AI Tracker <${process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev"}>`;
+
+  const { data, error } = await resend.emails.send({
+    from: fromAddr,
+    to,
+    subject,
+    html: html || text || "",
   });
+
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 async function startServer() {
@@ -715,64 +734,27 @@ async function startServer() {
   // Email Notification Route
   app.post("/api/notifications/send-email", async (req, res) => {
     const { to, subject, text, html } = req.body;
-    
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      return res.status(500).json({ error: "SMTP credentials not configured" });
-    }
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
     try {
-      await transporter.sendMail({
-        from: `"AI Tracker" <${process.env.SMTP_USER}>`,
-        to,
-        subject,
-        text,
-        html,
-      });
+      await sendEmail({ to, subject, html: html || text });
       res.json({ success: true });
     } catch (error: any) {
       console.error("Email Error:", error);
-      res.status(500).json({ 
-        error: "Failed to send email", 
-        details: error.message || "Unknown error" 
-      });
+      res.status(500).json({ error: "Failed to send email", details: error.message });
     }
   });
 
   // Invite Route
   app.post("/api/invites/send", async (req, res) => {
     const { email, inviteLink } = req.body;
-    
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      return res.status(500).json({ error: "SMTP credentials not configured" });
-    }
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
     try {
-      await transporter.sendMail({
-        from: `"AI Tracker" <${process.env.SMTP_USER}>`,
+      await sendEmail({
         to: email,
         subject: "You've been invited to AI Tracker",
         html: `
           <div style="font-family: sans-serif; padding: 20px; color: #333;">
             <h2 style="color: #2563EB;">Join AI Tracker</h2>
             <p>You have been invited to collaborate on a document workspace.</p>
-            <p>Click the button below to join:</p>
-            <a href="${inviteLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; rounded: 8px; font-weight: bold;">Accept Invitation</a>
+            <a href="${inviteLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a>
             <p style="margin-top: 20px; font-size: 12px; color: #666;">If you didn't expect this invitation, you can safely ignore this email.</p>
           </div>
         `,
@@ -780,10 +762,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error("Invite Error:", error);
-      res.status(500).json({ 
-        error: "Failed to send invite", 
-        details: error.message || "Unknown error" 
-      });
+      res.status(500).json({ error: "Failed to send invite", details: error.message });
     }
   });
 
@@ -1009,17 +988,13 @@ async function startServer() {
   // Reminder Logic
   async function checkAndSendReminders() {
     log(`[Reminders] Starting expiry check at ${new Date().toISOString()}`);
-    
-    const transporter = createTransporter();
-    if (!transporter) {
-      console.error("[Reminders] SMTP credentials missing. Reminders aborted.");
-      return { success: false, error: "SMTP not configured" };
+
+    if (!process.env.RESEND_API_KEY) {
+      console.error("[Reminders] RESEND_API_KEY missing. Reminders aborted.");
+      return { success: false, error: "Resend not configured" };
     }
 
     try {
-      await transporter.verify();
-      log("[Reminders] SMTP verified.");
-
       const now = new Date();
       const todayString = now.toISOString().split('T')[0];
       
@@ -1070,9 +1045,8 @@ async function startServer() {
           for (const doc of eligibleDocs) {
             log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
             try {
-              await transporter.sendMail({
-                from: `"AI Tracker Reminders" <${process.env.SMTP_USER}>`,
-                to: user.email || process.env.SMTP_USER,
+              await sendEmail({
+                to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
                 html: `
                   <div style="font-family: sans-serif; padding: 20px; color: #333; border: 1px solid #eee; border-radius: 12px; max-width: 600px;">
@@ -1085,7 +1059,7 @@ async function startServer() {
                       <p style="margin: 4px 0 0 0; color: #4B5563;">Number: ${doc.documentNumber || 'N/A'}</p>
                     </div>
                     <p>Please log in to AI Tracker to review or renew this document.</p>
-                    <a href="${process.env.APP_URL || '#'}" style="display: inline-block; padding: 12px 24px; background: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 10px;">Open Dashboard</a>
+                    <a href="${process.env.APP_URL || 'https://ai-doc-expiry-tracker.onrender.com'}" style="display: inline-block; padding: 12px 24px; background: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 10px;">Open Dashboard</a>
                     <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
                     <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker - Smart Document Intelligence</p>
                   </div>
@@ -1131,29 +1105,17 @@ async function startServer() {
     app.post("/api/notifications/test-email", async (req, res) => {
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Missing email" });
-
-      const transporter = createTransporter();
-      if (!transporter) {
-        return res.status(500).json({ error: "SMTP not configured" });
-      }
-
       try {
-        console.log("[TestEmail] Verifying SMTP connection...");
-        await transporter.verify();
-        console.log("[TestEmail] SMTP connection verified.");
-        
-        await transporter.sendMail({
-        from: `"AI Tracker" <${process.env.SMTP_USER}>`,
-        to: email,
-        subject: "AI Tracker - Test Email",
-        text: "This is a test email to verify your SMTP settings are working correctly.",
-        html: "<p>This is a test email to verify your SMTP settings are working correctly.</p>",
-      });
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("Test email failed:", error);
-      res.status(500).json({ error: "Failed to send test email", details: error.message });
-    }
+        await sendEmail({
+          to: email,
+          subject: "AI Tracker - Test Email ✅",
+          html: "<div style='font-family:sans-serif;padding:20px'><h2 style='color:#2563EB'>Test Successful!</h2><p>Your AI Tracker email notifications are working correctly.</p></div>",
+        });
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error("Test email failed:", error);
+        res.status(500).json({ error: "Failed to send test email", details: error.message });
+      }
   });
 
     // Send Full Status Report
@@ -1168,16 +1130,7 @@ async function startServer() {
         return res.status(400).json({ error: "Missing userId or email" });
       }
 
-      const transporter = createTransporter();
-      if (!transporter) {
-        return res.status(500).json({ error: "SMTP not configured" });
-      }
-
       try {
-        console.log("[Report] Verifying SMTP connection...");
-        await transporter.verify();
-        console.log("[Report] SMTP connection verified.");
-
         let docs: DocumentData[] = [];
       
       try {
@@ -1208,8 +1161,7 @@ async function startServer() {
 
       console.log(`[Report] Found ${docs.length} documents. Using interval: ${interval}`);
       if (docs.length === 0) {
-        await transporter.sendMail({
-          from: `"AI Tracker Reports" <${process.env.SMTP_USER}>`,
+        await sendEmail({
           to: email,
           subject: "AI Tracker - Document Status Report",
           html: `
@@ -1217,7 +1169,6 @@ async function startServer() {
               <h2 style="color: #2563EB; margin-bottom: 20px;">Document Status Report</h2>
               <p>Hello,</p>
               <p>You currently have no documents being tracked in your account.</p>
-              <p>To start tracking, please upload a document or scan one using your camera.</p>
               <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
               <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker</p>
             </div>
@@ -1233,23 +1184,18 @@ async function startServer() {
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.expiryDate}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">
-              ${text}
-            </td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">${text}</td>
           </tr>
         `;
       }).join("");
 
-      await transporter.sendMail({
-        from: `"AI Tracker Reports" <${process.env.SMTP_USER}>`,
+      await sendEmail({
         to: email,
         subject: "AI Tracker - Document Status Report",
         html: `
           <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 16px;">
             <h2 style="color: #2563EB; margin-bottom: 20px;">Document Status Report</h2>
-            <p>Hello,</p>
             <p>Here is the current status of all your tracked documents:</p>
-            
             <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
               <thead>
                 <tr style="background: #F9FAFB; text-align: left;">
@@ -1259,14 +1205,9 @@ async function startServer() {
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Status</th>
                 </tr>
               </thead>
-              <tbody>
-                ${tableRows}
-              </tbody>
+              <tbody>${tableRows}</tbody>
             </table>
-            
-            <p style="margin-top: 20px; font-size: 13px; color: #666;">
-              This report was generated on ${new Date().toLocaleString()}.
-            </p>
+            <p style="font-size: 13px; color: #666;">Generated on ${new Date().toLocaleString()}</p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
             <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker</p>
           </div>
@@ -1510,16 +1451,10 @@ async function startServer() {
   // Function to send report (internal)
    async function sendScheduledReport(userId: string, email: string, userInterval: string = "30") {
     console.log(`[Scheduled Report] Sending to ${email} (userId: ${userId}, interval: ${userInterval})`);
-    
-    const transporter = createTransporter();
-    if (!transporter) return;
 
     const interval = parseInt(userInterval || "30");
 
     try {
-      console.log("[Scheduled Report] Verifying SMTP connection...");
-      await transporter.verify();
-      console.log("[Scheduled Report] SMTP connection verified.");
       let docs: DocumentData[] = [];
       try {
         if (db) {
@@ -1547,14 +1482,12 @@ async function startServer() {
         `;
       }).join("") : '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #666;">No documents found</td></tr>';
 
-      await transporter.sendMail({
-        from: `"AI Tracker Reports" <${process.env.SMTP_USER}>`,
+      await sendEmail({
         to: email,
         subject: "AI Tracker - Scheduled Status Report",
         html: `
           <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 16px;">
             <h2 style="color: #2563EB; margin-bottom: 20px;">Scheduled Status Report</h2>
-            <p>Hello,</p>
             <p>Here is your scheduled document status report.</p>
             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
               <thead>
@@ -1759,12 +1692,10 @@ async function startServer() {
       gemini: !!process.env.GEMINI_API_KEY
     };
 
-    // 1. Test SMTP
+    // 1. Test Resend API
     try {
-      const transporter = createTransporter();
-      if (!transporter) throw new Error("Transporter creation failed (credentials missing)");
-      await transporter.verify();
-      results.smtp = "Verified (Connected & Authenticated)";
+      if (!process.env.RESEND_API_KEY) throw new Error("RESEND_API_KEY missing");
+      results.smtp = "Resend: Configured ✅";
     } catch (e: any) {
       results.smtp = `Failed: ${e.message}`;
     }
