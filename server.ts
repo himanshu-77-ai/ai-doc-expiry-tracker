@@ -12,7 +12,6 @@ import { GoogleAuth } from "google-auth-library";
 import { readFileSync } from "fs";
 import Stripe from "stripe";
 import crypto from "crypto";
-import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -58,21 +57,6 @@ const getStripe = () => {
   }
   return stripe;
 };
-
-// Initialize Twilio lazily
-function getTwilioClient() {
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  if (!sid || !token) return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const twilio = require("twilio");
-    return twilio(sid, token);
-  } catch (e) {
-    console.error("[Twilio] twilio package not installed. Run: npm install twilio");
-    return null;
-  }
-}
 
 // Initialize Firebase Admin lazily
 let db: any;
@@ -128,34 +112,32 @@ async function sendEmail({ from, to, subject, html, text }: {
   return data;
 }
 
-// ── SMTP Email via Nodemailer (for invite emails) ────────────────────────────
+// ── SMTP Email via Nodemailer (for invites — no domain needed) ───────────────
 async function sendEmailSMTP({ to, subject, html, text }: {
-  to: string;
-  subject: string;
-  html?: string;
-  text?: string;
+  to: string; subject: string; html?: string; text?: string;
 }) {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   if (!user || !pass) throw new Error("SMTP_USER or SMTP_PASS not configured");
-
+  const nodemailer = await import("nodemailer");
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: { user, pass },
   });
-
   await transporter.sendMail({
     from: `"AI Tracker" <${user}>`,
-    to,
-    subject,
+    to, subject,
     html: html || text || "",
   });
 }
 
 // ── WhatsApp via Twilio ───────────────────────────────────────────────────────
 async function sendWhatsApp(to: string, message: string) {
-  const client = getTwilioClient();
-  if (!client) throw new Error("Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.");
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token) throw new Error("Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.");
+  const twilio = await import("twilio");
+  const client = (twilio as any).default ? (twilio as any).default(sid, token) : (twilio as any)(sid, token);
   const from = process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886";
   const toWA = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
   return await client.messages.create({ from, to: toWA, body: message });
@@ -817,7 +799,7 @@ async function startServer() {
     }
   });
 
-  // WhatsApp Notification Route
+  // WhatsApp Send Route
   app.post("/api/notifications/whatsapp", async (req, res) => {
     const { to, message } = req.body;
     if (!to || !message) return res.status(400).json({ error: "Missing to or message" });
@@ -826,7 +808,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error("[WhatsApp] Send failed:", error.message);
-      res.status(500).json({ error: "Failed to send WhatsApp message", details: error.message });
+      res.status(500).json({ error: "Failed to send WhatsApp", details: error.message });
     }
   });
 
@@ -834,11 +816,8 @@ async function startServer() {
   app.get("/api/notifications/whatsapp/status", async (req, res) => {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
-    const from = process.env.TWILIO_WHATSAPP_FROM;
-    if (!sid || !token) {
-      return res.status(500).json({ error: "Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars." });
-    }
-    res.json({ configured: true, from: from || "whatsapp:+14155238886" });
+    if (!sid || !token) return res.status(500).json({ error: "Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars." });
+    res.json({ configured: true, from: process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886" });
   });
 
   // Helper to get service account token using google-auth-library
