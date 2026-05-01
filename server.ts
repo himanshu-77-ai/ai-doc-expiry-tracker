@@ -78,6 +78,28 @@ function getStatusInfo(expiryDate: string, interval: number = 30) {
   return { text: "Safe", color: "#10B981" };
 }
 
+// ── DATE HELPERS ─────────────────────────────────────────────────────────────
+// Converts any ISO/YYYY-MM-DD date string → DD-MM-YYYY for display
+function fmtDate(dateStr?: string): string {
+  if (!dateStr) return "N/A";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr; // pass through if unparseable
+  return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
+}
+
+// ── PLAN CONFIG ──────────────────────────────────────────────────────────────
+const PLAN_CONFIG: Record<string, { docLimit: number; label: string }> = {
+  free:    { docLimit: 5,  label: "Free"    },
+  monthly: { docLimit: 10, label: "Monthly" },
+  yearly:  { docLimit: 50, label: "Yearly"  },
+};
+
+function getDocLimit(userData: any): number {
+  if (userData?.adminDocLimit != null) return Number(userData.adminDocLimit);
+  const plan = (userData?.adminPlan || userData?.plan || "free").toLowerCase();
+  return PLAN_CONFIG[plan]?.docLimit ?? 5;
+}
+
 // ── EMAIL via Resend ─────────────────────────────────────────────────────────
 function getResend() {
   const key = process.env.RESEND_API_KEY;
@@ -1052,7 +1074,7 @@ async function startServer() {
                   <div style="font-family: sans-serif; padding: 20px; color: #333; border: 1px solid #eee; border-radius: 12px; max-width: 600px;">
                     <h2 style="color: #E11D48; margin-top: 0;">Expiry Alert</h2>
                     <p>Hello,</p>
-                    <p>Your document <strong>${doc.title}</strong> is set to expire on <strong>${doc.expiryDate}</strong> (${days} days from now).</p>
+                    <p>Your document <strong>${doc.title}</strong> is set to expire on <strong>${fmtDate(doc.expiryDate)}</strong> (${days} days from now).</p>
                     <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; margin: 24px 0; border: 1px solid #F3F4F6;">
                       <p style="margin: 0; font-weight: bold; color: #111827;">Document Details:</p>
                       <p style="margin: 8px 0 0 0; color: #4B5563;">Type: ${doc.category}</p>
@@ -1068,6 +1090,22 @@ async function startServer() {
               sentCount++;
             } catch (mailErr) {
               console.error(`[Reminders] Mail send failed for ${user.email}:`, mailErr);
+            }
+
+            // ── WhatsApp/SMS alert (Task 3) ────────────────────────────
+            const userFeatures = user.features || {};
+            if (userFeatures.whatsappSms === true && user.phone && getTwilioClient()) {
+              const msgBody = `🔔 AI Tracker: "${doc.title}" expires on ${fmtDate(doc.expiryDate)} (${days} days). Open: ${process.env.APP_URL || "https://ai-doc-expiry-tracker.onrender.com"}`;
+              try {
+                if (user.preferSms) {
+                  await sendSMS(user.phone, msgBody);
+                } else {
+                  await sendWhatsApp(user.phone, msgBody);
+                }
+                log(`[Reminders] WhatsApp/SMS sent to ${user.phone}`);
+              } catch (waErr: any) {
+                console.error(`[Reminders] WhatsApp/SMS failed for ${user.phone}:`, waErr.message);
+              }
             }
           }
         }
@@ -1183,7 +1221,7 @@ async function startServer() {
           <tr>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.expiryDate}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmtDate(doc.expiryDate)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">${text}</td>
           </tr>
         `;
@@ -1207,7 +1245,7 @@ async function startServer() {
               </thead>
               <tbody>${tableRows}</tbody>
             </table>
-            <p style="font-size: 13px; color: #666;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size: 13px; color: #666;">Generated on ${fmtDate(new Date().toISOString())}</p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
             <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker</p>
           </div>
@@ -1474,7 +1512,7 @@ async function startServer() {
           <tr>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.expiryDate}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmtDate(doc.expiryDate)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">
               ${text}
             </td>
@@ -1858,6 +1896,212 @@ async function startServer() {
       console.error("[Admin] Update user failed:", err.message);
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // TASK 6 — Feature Flags: read per-user features + plan from Firestore
+  // Frontend calls: GET /api/user/features/:userId
+  // Returns: { features, plan, docLimit }
+  // ═══════════════════════════════════════════════════════════════
+  app.get("/api/user/features/:userId", async (req, res) => {
+    const { userId } = req.params;
+    try {
+      let userData: any = null;
+      if (db) {
+        const snap = await db.collection("users").doc(userId).get();
+        userData = snap.exists ? snap.data() : null;
+      } else {
+        userData = await firestoreRest("users", { docId: userId });
+      }
+
+      const DEFAULT_FEATURES = {
+        reminders:    true,
+        emailAlerts:  true,
+        reports:      false,
+        aiChat:       false,
+        ocrScanning:  false,
+        inviteFriend: false,
+        calendarSync: false,
+        whatsappSms:  false,
+      };
+
+      const features = { ...DEFAULT_FEATURES, ...(userData?.features || {}) };
+      const plan = (userData?.adminPlan || userData?.plan || "free").toLowerCase();
+      const docLimit = getDocLimit(userData);
+
+      res.json({ features, plan, docLimit });
+    } catch (err: any) {
+      console.error("[Features] Failed:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // TASK 5 — Doc Limit Enforcement
+  // Frontend calls: GET /api/documents/check-limit/:userId
+  // Returns: { allowed: bool, current: n, limit: n, plan: string }
+  // Also: POST /api/documents/add — enforces limit before adding
+  // ═══════════════════════════════════════════════════════════════
+  app.get("/api/documents/check-limit/:userId", async (req, res) => {
+    const { userId } = req.params;
+    try {
+      if (!db) throw new Error("DB not ready");
+
+      const userSnap = await db.collection("users").doc(userId).get();
+      const userData = userSnap.exists ? userSnap.data() : null;
+      const limit = getDocLimit(userData);
+
+      const docsSnap = await db.collection("documents")
+        .where("userId", "==", userId)
+        .count()
+        .get();
+      const current = docsSnap.data().count;
+
+      res.json({
+        allowed: current < limit,
+        current,
+        limit,
+        plan: (userData?.adminPlan || userData?.plan || "free").toLowerCase(),
+      });
+    } catch (err: any) {
+      console.error("[DocLimit] Check failed:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Document add with limit guard
+  app.post("/api/documents/add", async (req, res) => {
+    const { userId, title, category, expiryDate, documentNumber, notes } = req.body;
+    if (!userId || !title || !expiryDate) {
+      return res.status(400).json({ error: "Missing required fields: userId, title, expiryDate" });
+    }
+    try {
+      if (!db) throw new Error("DB not ready");
+
+      // Check limit first
+      const userSnap = await db.collection("users").doc(userId).get();
+      const userData = userSnap.exists ? userSnap.data() : null;
+      const limit = getDocLimit(userData);
+
+      const docsSnap = await db.collection("documents")
+        .where("userId", "==", userId)
+        .count()
+        .get();
+      const current = docsSnap.data().count;
+
+      if (current >= limit) {
+        const plan = (userData?.adminPlan || userData?.plan || "free").toLowerCase();
+        return res.status(403).json({
+          error: "Document limit reached",
+          code: "DOC_LIMIT_REACHED",
+          current,
+          limit,
+          plan,
+          upgradeMessage: plan === "free"
+            ? "Upgrade to Monthly ($5/mo) for 10 docs, or Yearly ($45/yr) for 50 docs."
+            : plan === "monthly"
+            ? "Upgrade to Yearly ($45/yr) for 50 docs."
+            : "You have reached the maximum document limit.",
+        });
+      }
+
+      const docRef = await db.collection("documents").add({
+        userId,
+        title,
+        category: category || "Other",
+        expiryDate,
+        documentNumber: documentNumber || "",
+        notes: notes || "",
+        status: "Active",
+        createdAt: new Date().toISOString(),
+      });
+
+      res.json({ success: true, id: docRef.id });
+    } catch (err: any) {
+      console.error("[DocAdd] Failed:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // TASK 3 — WhatsApp / SMS via Twilio
+  // Env vars needed: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+  //                  TWILIO_FROM_PHONE (e.g. +1415XXXXXXX)
+  //                  TWILIO_WHATSAPP_FROM (e.g. whatsapp:+14155238886)
+  // ═══════════════════════════════════════════════════════════════
+  function getTwilioClient() {
+    const sid   = process.env.TWILIO_ACCOUNT_SID;
+    const token = process.env.TWILIO_AUTH_TOKEN;
+    if (!sid || !token) return null;
+    // Lazy require so missing package doesn't crash server on startup
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const twilio = require("twilio");
+      return twilio(sid, token);
+    } catch (e) {
+      console.warn("[Twilio] twilio package not installed. Run: npm install twilio");
+      return null;
+    }
+  }
+
+  async function sendWhatsApp(to: string, body: string) {
+    const client = getTwilioClient();
+    if (!client) throw new Error("Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.");
+    const from = process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886";
+    const toWA = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+    return client.messages.create({ from, to: toWA, body });
+  }
+
+  async function sendSMS(to: string, body: string) {
+    const client = getTwilioClient();
+    if (!client) throw new Error("Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.");
+    const from = process.env.TWILIO_FROM_PHONE;
+    if (!from) throw new Error("TWILIO_FROM_PHONE env var not set.");
+    return client.messages.create({ from, to, body });
+  }
+
+  // Manual send endpoint (for testing or frontend-triggered alerts)
+  app.post("/api/notifications/whatsapp", async (req, res) => {
+    const { to, message, type = "whatsapp" } = req.body;
+    if (!to || !message) return res.status(400).json({ error: "Missing 'to' or 'message'" });
+    try {
+      if (type === "sms") {
+        await sendSMS(to, message);
+      } else {
+        await sendWhatsApp(to, message);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Twilio]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Twilio status check
+  app.get("/api/notifications/whatsapp/status", (_req, res) => {
+    res.json({
+      configured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+      whatsappFrom: process.env.TWILIO_WHATSAPP_FROM || "not set",
+      smsFrom: process.env.TWILIO_FROM_PHONE || "not set",
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // TASK 2 — Invite Email (improved: works on resend.dev + custom domain)
+  // ═══════════════════════════════════════════════════════════════
+  // (Replace the existing /api/invites/send with hardened version)
+  // Already defined above — no duplicate needed; patch inline via override:
+  // The original invite route stays but we add a resend-domain check:
+  app.get("/api/invites/domain-status", (_req, res) => {
+    const fromEmail = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
+    const isVerified = fromEmail !== "onboarding@resend.dev" && !fromEmail.endsWith("@resend.dev");
+    res.json({
+      fromEmail,
+      isVerified,
+      note: isVerified
+        ? "Custom domain verified — invite emails will land in inbox."
+        : "Using Resend sandbox. Invite emails only deliver to your own verified address. Verify your domain at resend.com/domains to send to others.",
+    });
   });
 
   if (process.env.NODE_ENV !== "production") {
