@@ -112,7 +112,7 @@ async function sendEmail({ from, to, subject, html, text }: {
   return data;
 }
 
-// ── SMTP Email via Nodemailer (for invites — no domain needed) ───────────────
+// ── Gmail SMTP (for invites — no domain verification needed) ─────────────────
 async function sendEmailSMTP({ to, subject, html, text }: {
   to: string; subject: string; html?: string; text?: string;
 }) {
@@ -126,7 +126,8 @@ async function sendEmailSMTP({ to, subject, html, text }: {
   });
   await transporter.sendMail({
     from: `"AI Tracker" <${user}>`,
-    to, subject,
+    to,
+    subject,
     html: html || text || "",
   });
 }
@@ -774,12 +775,12 @@ async function startServer() {
     }
   });
 
-  // Invite Route — uses Gmail SMTP (no domain verification needed)
+  // Invite Route — uses Resend (original working code)
   app.post("/api/invites/send", async (req, res) => {
     const { email, inviteLink } = req.body;
     if (!email) return res.status(400).json({ error: "Missing email" });
     try {
-      await sendEmailSMTP({
+      await sendEmail({
         to: email,
         subject: "You have been invited to AI Tracker",
         html: `
@@ -788,7 +789,7 @@ async function startServer() {
             <p>You have been invited to collaborate on a document expiry tracking workspace.</p>
             <a href="${inviteLink}" style="display: inline-block; margin: 16px 0; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a>
             <p style="font-size: 13px; color: #555;">AI Tracker helps you manage and track important document expiry dates with AI-powered reminders.</p>
-            <p style="margin-top: 20px; font-size: 11px; color: #999;">If you did not expect this invitation, you can safely ignore this email.</p>
+            <p style="margin-top: 20px; font-size: 11px; color: #999;">If you did not expect this invitation, ignore this email.</p>
           </div>
         `,
       });
@@ -799,7 +800,7 @@ async function startServer() {
     }
   });
 
-  // WhatsApp Send Route
+  // BUG-10: WhatsApp Send Route
   app.post("/api/notifications/whatsapp", async (req, res) => {
     const { to, message } = req.body;
     if (!to || !message) return res.status(400).json({ error: "Missing to or message" });
@@ -816,7 +817,7 @@ async function startServer() {
   app.get("/api/notifications/whatsapp/status", async (req, res) => {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
-    if (!sid || !token) return res.status(500).json({ error: "Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars." });
+    if (!sid || !token) return res.status(500).json({ configured: false, error: "Twilio not configured" });
     res.json({ configured: true, from: process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886" });
   });
 
