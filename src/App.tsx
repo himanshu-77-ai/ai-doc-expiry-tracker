@@ -115,6 +115,10 @@ function getEffectiveDocLimit(userData: any): number {
 }
 
 function getEffectiveFeatures(userData: any): Record<string, boolean> {
+  // Admin always gets ALL features unlocked
+  if (userData?.uid === ADMIN_UID) {
+    return Object.fromEntries(Object.keys(DEFAULT_FEATURES).map(k => [k, true])) as Record<string, boolean>;
+  }
   return { ...DEFAULT_FEATURES, ...(userData?.features || {}) };
 }
 
@@ -564,10 +568,9 @@ body: JSON.stringify({
       await updateDoc(docRef, {
         status: 'Renewed',
         expiryDate: storedExpiry,
-        expiryDate: newExpiry,
         updatedAt: serverTimestamp()
       });
-      alert(`Renewed! New expiry: ${newExpiry}`);
+      alert(`Renewed! New expiry: ${storedExpiry}`);
     } catch (err) {
       console.error("Renew error:", err);
       setError("Failed to mark document as renewed.");
@@ -849,7 +852,7 @@ body: JSON.stringify({
     } finally {
       setIsSendingInvite(false);
     }
-  };
+  };;
 
   const updateDocument = async (id: string, data: Partial<Document>) => {
     try {
@@ -904,7 +907,7 @@ body: JSON.stringify({
   }
 
   return (
-    <div className="flex h-svh bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden" style={{height: "100dvh"}}>
+    <div className="flex bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden" style={{height:"100dvh"}}>
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -912,6 +915,7 @@ body: JSON.stringify({
         setIsSidebarOpen={setIsSidebarOpen} 
         handleLogout={handleLogout}
         userId={user?.uid}
+        userData={userData}
       />
 
       {/* Main Content */}
@@ -929,33 +933,6 @@ body: JSON.stringify({
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 lg:p-12">
           <ErrorDisplay error={error} setError={setError} />
-
-          {/* Feature-gated upgrade banner */}
-          {(() => {
-            const ef = getEffectiveFeatures(userData);
-            const featureTabMap: Record<string, string> = {
-              reminders: "reminders",
-              reports: "reports",
-              inviteFriend: "invite",
-              calendarSync: "calendar",
-            };
-            const currentFeatureKey = Object.keys(featureTabMap).find(k => featureTabMap[k] === activeTab);
-            if (currentFeatureKey && !ef[currentFeatureKey]) {
-              return (
-                <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
-                  <div className="w-16 h-16 bg-yellow-50 text-yellow-500 rounded-full flex items-center justify-center">
-                    <Shield size={32} />
-                  </div>
-                  <h2 className="text-xl font-bold">Feature Locked</h2>
-                  <p className="text-gray-500 max-w-sm">This feature is not available on your current plan. Please upgrade to access it.</p>
-                  <button onClick={() => setActiveTab("subscription")} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">
-                    Upgrade Plan
-                  </button>
-                </div>
-              );
-            }
-            return null;
-          })()}
           
           {activeTab === "dashboard" && (
             <DashboardView 
@@ -994,6 +971,7 @@ body: JSON.stringify({
           {activeTab === "settings" && (
             <SettingsView 
               user={user}
+              userData={userData}
               configStatus={configStatus}
               isRefreshingStatus={isRefreshingStatus}
               onRefreshStatus={refreshConfigStatus}
@@ -1151,15 +1129,13 @@ body: JSON.stringify({
         </div>
       </main>
 
-      {/* AI Chat Button — gated by aiChat feature flag */}
-      {getEffectiveFeatures(userData).aiChat && (
-        <button 
-          onClick={() => setIsChatOpen(true)}
-          className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50"
-        >
-          <MessageSquare size={24} />
-        </button>
-      )}
+      {/* AI Chat Button */}
+      <button 
+        onClick={() => setIsChatOpen(true)}
+        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50"
+      >
+        <MessageSquare size={24} />
+      </button>
 
       <ChatAssistant 
         isOpen={isChatOpen}
@@ -1198,8 +1174,8 @@ body: JSON.stringify({
           if (documents.length >= docLimit) {
             setError(
               effectivePlanName === "free"
-                ? `Free plan allows only ${docLimit} documents. Please upgrade to a Monthly or Yearly plan!`
-                : `Your ${effectivePlanName} plan is limited to ${docLimit} documents. Please contact the admin.`
+                ? `Free plan allows only ${docLimit} documents. Upgrade to Monthly or Yearly plan!`
+                : `Your ${effectivePlanName} plan is limited to ${docLimit} documents. Please contact admin.`
             );
             return;
           }
