@@ -547,7 +547,7 @@ body: JSON.stringify({
     try {
       if (!user) return;
       const newExpiry = prompt(
-        `"${docObj.title}" ki nayi expiry date enter karo (DD-MM-YYYY):`,
+        `Enter new expiry date for "${docObj.title}" (DD-MM-YYYY):`,
         ""
       );
       if (!newExpiry) return;
@@ -557,7 +557,7 @@ body: JSON.stringify({
         const [dd, mm, yyyy] = newExpiry.split("-");
         storedExpiry = `${yyyy}-${mm}-${dd}`;
       } else if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) {
-        alert("Invalid format! DD-MM-YYYY use karo (e.g. 25-04-2027)");
+        alert("Invalid format! Please use DD-MM-YYYY (e.g. 25-04-2027)");
         return;
       }
       const docRef = doc(db, "documents", docObj.id);
@@ -904,7 +904,7 @@ body: JSON.stringify({
   }
 
   return (
-    <div className="flex h-svh bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden">
+    <div className="flex h-svh bg-[#F8F9FA] text-[#1A1A1A] font-sans overflow-hidden" style={{height: "100dvh"}}>
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -929,6 +929,33 @@ body: JSON.stringify({
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 lg:p-12">
           <ErrorDisplay error={error} setError={setError} />
+
+          {/* Feature-gated upgrade banner */}
+          {(() => {
+            const ef = getEffectiveFeatures(userData);
+            const featureTabMap: Record<string, string> = {
+              reminders: "reminders",
+              reports: "reports",
+              inviteFriend: "invite",
+              calendarSync: "calendar",
+            };
+            const currentFeatureKey = Object.keys(featureTabMap).find(k => featureTabMap[k] === activeTab);
+            if (currentFeatureKey && !ef[currentFeatureKey]) {
+              return (
+                <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
+                  <div className="w-16 h-16 bg-yellow-50 text-yellow-500 rounded-full flex items-center justify-center">
+                    <Shield size={32} />
+                  </div>
+                  <h2 className="text-xl font-bold">Feature Locked</h2>
+                  <p className="text-gray-500 max-w-sm">This feature is not available on your current plan. Please upgrade to access it.</p>
+                  <button onClick={() => setActiveTab("subscription")} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">
+                    Upgrade Plan
+                  </button>
+                </div>
+              );
+            }
+            return null;
+          })()}
           
           {activeTab === "dashboard" && (
             <DashboardView 
@@ -1124,13 +1151,15 @@ body: JSON.stringify({
         </div>
       </main>
 
-      {/* AI Chat Button */}
-      <button 
-        onClick={() => setIsChatOpen(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50"
-      >
-        <MessageSquare size={24} />
-      </button>
+      {/* AI Chat Button — gated by aiChat feature flag */}
+      {getEffectiveFeatures(userData).aiChat && (
+        <button 
+          onClick={() => setIsChatOpen(true)}
+          className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50"
+        >
+          <MessageSquare size={24} />
+        </button>
+      )}
 
       <ChatAssistant 
         isOpen={isChatOpen}
@@ -1169,8 +1198,8 @@ body: JSON.stringify({
           if (documents.length >= docLimit) {
             setError(
               effectivePlanName === "free"
-                ? `Free plan mein sirf ${docLimit} documents allowed hain. Monthly ya Yearly plan upgrade karein!`
-                : `Aapka ${effectivePlanName} plan ${docLimit} documents tak limited hai. Admin se contact karein.`
+                ? `Free plan allows only ${docLimit} documents. Please upgrade to a Monthly or Yearly plan!`
+                : `Your ${effectivePlanName} plan is limited to ${docLimit} documents. Please contact the admin.`
             );
             return;
           }
