@@ -610,6 +610,10 @@ body: JSON.stringify({
     expired: documents.filter(d => getStatus(d.expiryDate) === 'Expired').length,
   }), [documents, getStatus]);
 
+  // ── Component-level plan & limit (used by Header + handleSaveDocument) ──
+  const docLimit = getEffectiveDocLimit(userData);
+  const effectivePlanName = getEffectivePlan(userData);
+
   const filteredDocs = useMemo(() => {
     return documents.filter(doc => {
       const docTitle = doc.title || "";
@@ -1222,9 +1226,7 @@ Track your document expiry dates with AI.
         onSave={async (data) => {
           if (!user) return;
 
-          // ── PLAN-BASED DOC LIMIT ─────────────────────────────────
-          const docLimit = getEffectiveDocLimit(userData);
-          const effectivePlanName = getEffectivePlan(userData);
+          // ── PLAN-BASED DOC LIMIT (uses component-level docLimit) ──
           if (documents.length >= docLimit) {
             setError(
               effectivePlanName === "free"
@@ -1233,7 +1235,7 @@ Track your document expiry dates with AI.
             );
             return;
           }
-          // ────────────────────────────────────────────────────────
+          // ──────────────────────────────────────────────────────────
 
           setIsSavingDoc(true);
           setSaveStage('preparing');
