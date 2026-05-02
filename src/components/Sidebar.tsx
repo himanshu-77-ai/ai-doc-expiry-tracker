@@ -78,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         animate={{ 
           x: isDesktop ? 0 : (isSidebarOpen ? 0 : -300) 
         }}
-        className={`fixed lg:static inset-y-0 left-0 w-72 bg-white border-r border-gray-100 z-50 transition-transform duration-300 ease-in-out flex flex-col`}
+        className={`fixed lg:static inset-y-0 left-0 w-72 bg-white border-r border-gray-100 z-50 transition-transform duration-300 ease-in-out flex flex-col overflow-hidden`}
       >
         <div className="p-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -92,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2 mt-4">
+        <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
           {menuItems.map((item) => (
             <button
               key={item.id}
