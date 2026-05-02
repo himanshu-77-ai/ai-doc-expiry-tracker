@@ -42,7 +42,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4">
         <div>
           <h2 className="text-3xl font-black tracking-tight text-gray-900">Status Reports</h2>
           <p className="text-gray-500 font-medium">Analyze your document visibility and expiry trends.</p>
@@ -50,21 +50,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         <button 
           onClick={onSendReport}
           disabled={isSendingReport}
-          className="bg-gray-900 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 hover:bg-black transition-all shadow-xl shadow-gray-200 disabled:opacity-50"
+          className="w-full sm:w-auto bg-gray-900 text-white px-6 py-3 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-black transition-all disabled:opacity-50"
         >
           {isSendingReport ? <Loader2 className="animate-spin" size={20} /> : <Mail size={20} />}
           Email Me Full Report
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Total Asset Items", value: stats.total, color: "blue", icon: FileText },
           { label: "Secured & Active", value: stats.active, color: "green", icon: CheckCircle2 },
           { label: "Expiring items", value: stats.soon, color: "amber", icon: Clock },
           { label: "Critical Expiry", value: stats.expired, color: "red", icon: BarChart3 },
         ].map((stat, i) => (
-          <div key={i} className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+          <div key={i} className="bg-white p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
             <div className={`w-12 h-12 rounded-2xl bg-${stat.color}-50 text-${stat.color}-600 flex items-center justify-center mb-6`}>
               <stat.icon size={24} />
             </div>
@@ -74,8 +74,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] border border-gray-100 shadow-sm">
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-xl font-bold">Reporting Schedule</h3>
             <Calendar className="text-blue-600" />
