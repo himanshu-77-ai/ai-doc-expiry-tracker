@@ -833,7 +833,7 @@ _AI Tracker — Smart Document Intelligence_`;
       }
       if (method === "email" || method === "both") {
         if (!email) return res.status(400).json({ error: "Missing email" });
-        await sendEmailSMTP({
+        await sendEmail({
           to: email,
           subject: "You have been invited to AI Tracker",
           html: `
@@ -1148,6 +1148,11 @@ _AI Tracker — Smart Document Intelligence_`;
       let sentCount = 0;
 
       for (const user of allUsers) {
+        // Skip if emailAlerts disabled for this user
+        if (user.features?.emailAlerts === false) {
+          console.log(`[Reminders] Skipping ${user.email} - emailAlerts disabled`);
+          continue;
+        }
         const interval = parseInt(user.expiryInterval || "30");
         const triggerDays = [...new Set([interval, 7, 1])].sort((a, b) => b - a);
         
@@ -1180,6 +1185,24 @@ _AI Tracker — Smart Document Intelligence_`;
             log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
             try {
               // Email reminder
+              // WhatsApp reminder
+              if (user.whatsappPhone) {
+                try {
+                  const emoji = days <= 1 ? "URGENT" : days <= 7 ? "WARNING" : "REMINDER";
+                  const waMsg = [
+                    "AI Tracker - " + emoji,
+                    "",
+                    doc.title + " expires in " + days + " day" + (days > 1 ? "s" : "") + "!",
+                    "Expiry: " + doc.expiryDate,
+                    "Type: " + doc.category,
+                    "",
+                    "Open app: https://ai-doc-expiry-tracker.onrender.com"
+                  ].join("\n");
+                  await sendWhatsApp(user.whatsappPhone, waMsg);
+                } catch (waErr: any) {
+                  console.error("[Reminders] WhatsApp failed:", waErr.message);
+                }
+              }
               await sendEmail({
                 to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
@@ -1442,7 +1465,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Update User Report Settings
   app.post("/api/user/report-settings", async (req, res) => {
-    const { userId, frequency, time, expiryInterval, displayName, photoURL } = req.body;
+    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone } = req.body;
     const authHeader = req.headers.authorization;
     const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
 
@@ -1461,6 +1484,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
           if (expiryInterval) updateData.expiryInterval = expiryInterval.toString();
           if (displayName) updateData.displayName = displayName;
           if (photoURL) updateData.photoURL = photoURL;
+          if (whatsappPhone || phone) updateData.whatsappPhone = whatsappPhone || phone;
 
           await db.collection("users").doc(userId).set(updateData, { merge: true });
           success = true;
