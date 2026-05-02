@@ -321,7 +321,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 Send WhatsApp Report
               </button>
             </div>
-            {!whatsappPhone && (
+            {!whatsappPhone && !localPhone && (
               <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
                 ⚠️ Add your WhatsApp number in Account Settings above to enable WhatsApp reports.
               </p>
