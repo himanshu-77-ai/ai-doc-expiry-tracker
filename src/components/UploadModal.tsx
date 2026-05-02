@@ -237,6 +237,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   onChange={(e) => setManualFormData({...manualFormData, category: e.target.value})}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                 >
+                  <option value="Aadhaar Card">Aadhaar Card</option>
+                  <option value="PAN Card">PAN Card</option>
+                  <option value="Passport">Passport</option>
+                  <option value="Driving License">Driving License</option>
+                  <option value="Vehicle Insurance">Vehicle Insurance</option>
+                  <option value="RC Book">RC Book</option>
+                  <option value="GST Registration">GST Registration</option>
+                  <option value="Shop License">Shop License</option>
                   <option value="Identity">Identity</option>
                   <option value="License">License</option>
                   <option value="Insurance">Insurance</option>
