@@ -11,7 +11,9 @@ import {
   AlertTriangle,
   Bell,
   Camera,
-  Globe
+  Globe,
+  Phone,
+  MessageCircle
 } from "lucide-react";
 import { User, Document } from "../types";
 import { format } from "date-fns";
@@ -39,11 +41,16 @@ interface SettingsViewProps {
   setUpiSettings: React.Dispatch<React.SetStateAction<any>>;
   isSavingUpi: boolean;
   onSaveUpiSettings: () => void;
-  onSaveProfile: (data: { displayName: string, expiryInterval: number, photoFile?: File }) => Promise<void>;
+  onSaveProfile: (data: { displayName: string, expiryInterval: number, photoFile?: File, whatsappPhone?: string }) => Promise<void>;
   isSavingProfile: boolean;
   recentDocuments: Document[];
   isTestingStorage: boolean;
   onTestStorage: () => void;
+  userData?: any;
+  whatsappPhone: string;
+  setWhatsappPhone: (v: string) => void;
+  isSendingWhatsAppReport: boolean;
+  onSendWhatsAppReport: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -73,9 +80,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isSavingProfile,
   recentDocuments,
   isTestingStorage,
-  onTestStorage
+  onTestStorage,
+  userData,
+  whatsappPhone,
+  setWhatsappPhone,
+  isSendingWhatsAppReport,
+  onSendWhatsAppReport,
 }) => {
   const [name, setName] = React.useState(user.displayName || "");
+  const [localPhone, setLocalPhone] = React.useState(whatsappPhone || userData?.whatsappPhone || "");
   const [profileFile, setProfileFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -93,10 +106,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleSaveProfile = () => {
+    setWhatsappPhone(localPhone);
     onSaveProfile({ 
       displayName: name, 
       expiryInterval,
-      photoFile: profileFile || undefined 
+      photoFile: profileFile || undefined,
+      whatsappPhone: localPhone,
     });
   };
 
@@ -133,7 +148,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <p className="font-bold text-lg">{user.displayName}</p>
               <p className="text-gray-500">{user.email}</p>
               <div className="flex items-center gap-2 mt-2">
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase tracking-wider">{user.plan || 'Free'} Plan</span>
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase tracking-wider">
+                  {userData?.plan || user.plan || 'Free'} Plan
+                </span>
               </div>
             </div>
           </div>
@@ -151,6 +168,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700">Email Address</label>
               <input type="email" defaultValue={user.email || ""} disabled className="w-full px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl text-gray-500 font-medium" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <MessageCircle size={14} className="text-green-600" />
+                WhatsApp Number
+              </label>
+              <input
+                type="tel"
+                value={localPhone}
+                onChange={(e) => setLocalPhone(e.target.value)}
+                placeholder="+91 98765 43210"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-green-500/20 transition-all font-medium"
+              />
+              <p className="text-xs text-gray-400">With country code. Used for WhatsApp alerts & reports.</p>
             </div>
           </div>
           
@@ -279,7 +310,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {isTestingStorage ? <Loader2 className="animate-spin" size={18} /> : <Globe size={18} />}
                 Test Storage Connection
               </button>
+
+              <button
+                disabled={isSendingWhatsAppReport || !whatsappPhone}
+                onClick={onSendWhatsAppReport}
+                title={!whatsappPhone ? "Save WhatsApp number in Account Settings first" : ""}
+                className="px-6 py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all shadow-lg shadow-green-400/20 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSendingWhatsAppReport ? <Loader2 className="animate-spin" size={18} /> : <MessageCircle size={18} />}
+                Send WhatsApp Report
+              </button>
             </div>
+            {!whatsappPhone && (
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                ⚠️ Add your WhatsApp number in Account Settings above to enable WhatsApp reports.
+              </p>
+            )}
           </div>
 
           <div className="pt-8 border-t border-gray-100">
