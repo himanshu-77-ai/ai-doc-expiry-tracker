@@ -50,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex-1 flex items-center justify-end gap-3 lg:gap-6">
-        <div className="hidden sm:flex items-center gap-2 border-r border-gray-100 pr-6">
+        <div className="flex items-center gap-2 border-r border-gray-100 pr-3 lg:pr-6">
           <button onClick={exportToExcel} className="p-2.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all" title="Export Excel">
             <Download size={20} />
           </button>
