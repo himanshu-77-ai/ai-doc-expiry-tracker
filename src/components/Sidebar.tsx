@@ -14,7 +14,6 @@ import {
   Crown
 } from "lucide-react";
 import { motion } from "motion/react";
-import { ADMIN_UID } from "./AdminPanel";
 
 interface SidebarProps {
   activeTab: string;
@@ -24,6 +23,7 @@ interface SidebarProps {
   handleLogout: () => void;
   userId?: string;
   userData?: any;
+  isAdmin?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -33,9 +33,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setIsSidebarOpen, 
   handleLogout,
   userId,
-  userData
+  userData,
+  isAdmin: isAdminProp = false
 }) => {
-  const isAdmin = userId === ADMIN_UID;
+  const isAdmin = isAdminProp;
   const features = userData?.features || {};
   const hasReports = isAdmin || features.reports !== false;
   const hasInvite = isAdmin || features.inviteFriend !== false;
