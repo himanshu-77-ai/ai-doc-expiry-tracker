@@ -605,7 +605,7 @@ body: JSON.stringify({
   // Optimized stats and filtering
   const stats = useMemo(() => ({
     total: documents.length,
-    safe: documents.filter(d => d.status === 'Renewed' && getStatus(d.expiryDate) !== 'Expired' || getStatus(d.expiryDate) === 'Safe').length,
+    safe: documents.filter(d => getStatus(d.expiryDate) === 'Safe' || d.status === 'Renewed').length,
     expiring: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expiring Soon').length,
     expired: documents.filter(d => getStatus(d.expiryDate) === 'Expired').length,
   }), [documents, getStatus]);
@@ -776,13 +776,13 @@ body: JSON.stringify({
       doc.text("AI Tracker - Document Report", 14, 22);
       doc.setFontSize(11);
       doc.setTextColor(100);
-      doc.text(`Generated on: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`, 14, 30);
+      doc.text(`Generated on: ${format(new Date(), 'dd-MM-yyyy HH:mm')}`, 14, 30);
       
       // @ts-ignore
       doc.autoTable({
         startY: 40,
         head: [['Title', 'Category', 'Expiry Date', 'Status', 'Doc Number']],
-        body: documents.map(d => [d.title, d.category, d.expiryDate, getStatus(d.expiryDate), d.documentNumber || '-']),
+        body: documents.map(d => [d.title, d.category, d.expiryDate ? format(parseISO(d.expiryDate), 'dd-MM-yyyy') : 'N/A', getStatus(d.expiryDate), d.documentNumber || '-']),
         theme: 'grid',
         headStyles: { fillColor: [37, 99, 235], textColor: 255 },
         alternateRowStyles: { fillColor: [248, 249, 250] }
@@ -969,6 +969,10 @@ Track your document expiry dates with AI.
           setSelectedFile={setSelectedFile}
           exportToExcel={exportToExcel}
           exportToPDF={exportToPDF}
+          docsUsed={documents.length}
+          docLimit={docLimit}
+          plan={effectivePlanName}
+          onUpgradeClick={() => setActiveTab("subscription")}
         />
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 lg:p-12">
@@ -1011,6 +1015,7 @@ Track your document expiry dates with AI.
           {activeTab === "settings" && (
             <SettingsView 
               user={user}
+              userData={userData}
               userData={userData}
               configStatus={configStatus}
               isRefreshingStatus={isRefreshingStatus}
@@ -1156,7 +1161,7 @@ Track your document expiry dates with AI.
             />
           )}
 
-          {activeTab === "reports" && (
+          {activeTab === "reports" && getEffectiveFeatures(userData).reports && (
             <ReportsView 
               documents={documents}
               isSendingReport={isSendingReport}
@@ -1176,13 +1181,15 @@ Track your document expiry dates with AI.
         </div>
       </main>
 
-      {/* AI Chat Button */}
-      <button 
-        onClick={() => setIsChatOpen(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50"
-      >
-        <MessageSquare size={24} />
-      </button>
+      {/* AI Chat Button — gated by aiChat feature flag */}
+      {getEffectiveFeatures(userData).aiChat && (
+        <button 
+          onClick={() => setIsChatOpen(true)}
+          className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-50"
+        >
+          <MessageSquare size={24} />
+        </button>
+      )}
 
       <ChatAssistant 
         isOpen={isChatOpen}
