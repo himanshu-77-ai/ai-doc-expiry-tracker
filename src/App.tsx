@@ -115,7 +115,6 @@ function getEffectiveDocLimit(userData: any): number {
 }
 
 function getEffectiveFeatures(userData: any): Record<string, boolean> {
-  // Admin always gets ALL features unlocked
   if (userData?.uid === ADMIN_UID) {
     return Object.fromEntries(Object.keys(DEFAULT_FEATURES).map(k => [k, true])) as Record<string, boolean>;
   }
@@ -176,6 +175,29 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [whatsappPhone, setWhatsappPhone] = useState("");
+  const [isSendingWhatsAppReport, setIsSendingWhatsAppReport] = useState(false);
+
+  const onSendWhatsAppReport = async () => {
+    if (!user || !whatsappPhone) return;
+    setIsSendingWhatsAppReport(true);
+    try {
+      const res = await fetch("/api/notifications/whatsapp-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.uid, phone: whatsappPhone })
+      });
+      if (res.ok) alert("WhatsApp report sent! 📱");
+      else {
+        const e = await res.json();
+        throw new Error(e.details || e.error);
+      }
+    } catch (err: any) {
+      setError(`WhatsApp report failed: ${err.message}`);
+    } finally {
+      setIsSendingWhatsAppReport(false);
+    }
+  };
   const [isTestingStorage, setIsTestingStorage] = useState(false);
 
   const sendReport = async () => {
@@ -324,6 +346,7 @@ body: JSON.stringify({
                 setExpiryInterval(parsedVal);
               }
             }
+            if (data.whatsappPhone) setWhatsappPhone(data.whatsappPhone);
           }
           // Delay marking load as complete to ensure state updates have propagated
           setTimeout(() => {
@@ -340,7 +363,7 @@ body: JSON.stringify({
     }
   }, [user]);
 
-  const saveProfile = async (data: { displayName: string, expiryInterval: number, photoFile?: File }) => {
+  const saveProfile = async (data: { displayName: string, expiryInterval: number, photoFile?: File, whatsappPhone?: string }) => {
     if (!user) return;
     setIsSavingProfile(true);
     try {
@@ -381,6 +404,7 @@ body: JSON.stringify({
           userId: user.uid,
           displayName: data.displayName,
           expiryInterval: data.expiryInterval,
+          whatsappPhone: data.whatsappPhone || whatsappPhone,
           photoURL: finalPhotoURL,
           ...reportSettings
         })
@@ -411,6 +435,7 @@ body: JSON.stringify({
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [invitePhone, setInvitePhone] = useState("");
   const webcamRef = React.useRef<Webcam>(null);
 
   // Auto-save settings
@@ -570,7 +595,7 @@ body: JSON.stringify({
         expiryDate: storedExpiry,
         updatedAt: serverTimestamp()
       });
-      alert(`Renewed! New expiry: ${storedExpiry}`);
+      alert(`Renewed! New expiry: ${newExpiry}`);
     } catch (err) {
       console.error("Renew error:", err);
       setError("Failed to mark document as renewed.");
@@ -826,22 +851,37 @@ body: JSON.stringify({
     }
   };
 
-  const sendInvite = async () => {
-    if (!inviteEmail) return;
+  const sendInvite = async (method: "email" | "whatsapp" | "both" = "email") => {
+    if (method !== "whatsapp" && !inviteEmail) { setError("Please enter an email address."); return; }
+    if (method === "whatsapp" && !invitePhone) { setError("Please enter a WhatsApp number."); return; }
     setIsSendingInvite(true);
     try {
       const inviteId = Math.random().toString(36).substr(2, 9);
+      const inviteLink = `${window.location.origin}?invite=${inviteId}`;
+
+      // WhatsApp Web Share (native) for whatsapp method
+      if (method === "whatsapp") {
+        const waText = encodeURIComponent(`🔐 You are invited to AI Tracker!
+
+Track your document expiry dates with AI.
+
+👉 Join here: ${inviteLink}`);
+        window.open(`https://wa.me/${invitePhone.replace(/[^0-9]/g,'')}?text=${waText}`, "_blank");
+        setInvitePhone("");
+        setIsSendingInvite(false);
+        return;
+      }
+
+      // Email via server
       const response = await fetch("/api/invites/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: inviteEmail,
-          inviteLink: `${window.location.origin}?invite=${inviteId}`
-        })
+        body: JSON.stringify({ email: inviteEmail, phone: invitePhone, inviteLink, method })
       });
       if (response.ok) {
-        alert("Invite sent successfully!");
+        alert(`Invite sent successfully via ${method}! 🎉`);
         setInviteEmail("");
+        setInvitePhone("");
       } else {
         const errorData = await response.json();
         throw new Error(errorData.details || errorData.error || "Failed to send invite");
@@ -852,7 +892,7 @@ body: JSON.stringify({
     } finally {
       setIsSendingInvite(false);
     }
-  };;
+  };
 
   const updateDocument = async (id: string, data: Partial<Document>) => {
     try {
@@ -1046,6 +1086,11 @@ body: JSON.stringify({
                 }
               }}
               onSaveProfile={saveProfile}
+              userData={userData}
+              whatsappPhone={whatsappPhone}
+              setWhatsappPhone={setWhatsappPhone}
+              isSendingWhatsAppReport={isSendingWhatsAppReport}
+              onSendWhatsAppReport={onSendWhatsAppReport}
               isSavingProfile={isSavingProfile}
               recentDocuments={documents}
               isTestingStorage={isTestingStorage}
@@ -1081,6 +1126,8 @@ body: JSON.stringify({
             <InviteView 
               inviteEmail={inviteEmail}
               setInviteEmail={setInviteEmail}
+              invitePhone={invitePhone}
+              setInvitePhone={setInvitePhone}
               isSendingInvite={isSendingInvite}
               onSendInvite={sendInvite}
             />
@@ -1174,7 +1221,7 @@ body: JSON.stringify({
           if (documents.length >= docLimit) {
             setError(
               effectivePlanName === "free"
-                ? `Free plan allows only ${docLimit} documents. Upgrade to Monthly or Yearly plan!`
+                ? `Free plan allows only ${docLimit} documents. Please upgrade to Monthly or Yearly plan!`
                 : `Your ${effectivePlanName} plan is limited to ${docLimit} documents. Please contact admin.`
             );
             return;
