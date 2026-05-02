@@ -36,15 +36,17 @@ export function InviteView({
 
   const shareWhatsAppDirect = () => {
     if (!phone) return;
-    const num = phone.replace(/[^0-9]/g, "");
-    const text = encodeURIComponent("You are invited to AI Tracker!\n\nTrack your document expiry dates with AI-powered reminders.\n\nJoin here: " + inviteLink);
-    window.open("https://wa.me/" + num + "?text=" + text, "_blank");
-    setPhone("");
+    const num = phone.replace(/[^0-9+\s-]/g, "").replace(/\s|-/g, "");
+    const text = encodeURIComponent("You are invited to AI Tracker! Track your document expiry dates with AI-powered reminders. Join here: " + inviteLink);
+    // Use whatsapp:// protocol for direct open without chooser popup
+    const waLink = "https://wa.me/" + num.replace("+", "") + "?text=" + text;
+    window.location.href = waLink;
+    setTimeout(() => setPhone(""), 500);
   };
 
   const shareWhatsAppGeneral = () => {
-    const text = encodeURIComponent("You are invited to AI Tracker!\n\nTrack your document expiry dates with AI-powered reminders.\n\nJoin here: " + inviteLink);
-    window.open("https://wa.me/?text=" + text, "_blank");
+    const text = encodeURIComponent("You are invited to AI Tracker! Track your document expiry dates with AI-powered reminders. Join here: " + inviteLink);
+    window.location.href = "https://wa.me/?text=" + text;
   };
 
   return (
