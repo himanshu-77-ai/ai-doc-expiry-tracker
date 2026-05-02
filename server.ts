@@ -1662,6 +1662,15 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `;
       }).join("") : '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #666;">No documents found</td></tr>';
 
+      // Skip if Resend not configured for this recipient (domain not verified)
+      const resendOwnerEmail = process.env.RESEND_FROM_EMAIL || "himansh.cs91@gmail.com";
+      const canSendToThisUser = email === resendOwnerEmail || 
+                                 email === process.env.SMTP_USER ||
+                                 process.env.RESEND_DOMAIN_VERIFIED === "true";
+      if (!canSendToThisUser) {
+        console.log(`[Scheduled Report] Skipping ${email} — Resend domain not verified yet. Verify at resend.com/domains`);
+        // Still send WhatsApp if phone available
+      } else
       await sendEmail({
         to: email,
         subject: "AI Tracker - Scheduled Status Report",
