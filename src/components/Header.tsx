@@ -16,6 +16,10 @@ interface HeaderProps {
   setSelectedFile: (file: File | null) => void;
   exportToExcel: () => void;
   exportToPDF: () => void;
+  docsUsed?: number;
+  docLimit?: number;
+  plan?: string;
+  onUpgradeClick?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,8 +30,14 @@ export const Header: React.FC<HeaderProps> = ({
   setScannedData,
   setSelectedFile,
   exportToExcel,
-  exportToPDF
+  exportToPDF,
+  docsUsed = 0,
+  docLimit = 5,
+  plan = "free",
+  onUpgradeClick
 }) => {
+  const usagePercent = Math.min((docsUsed / docLimit) * 100, 100);
+  const isNearLimit = docsUsed >= docLimit - 1;
   return (
     <header className="h-20 bg-white border-b border-gray-100 px-4 lg:px-12 flex items-center justify-between gap-4 shrink-0">
       <div className="flex items-center gap-4 lg:hidden">
@@ -68,6 +78,28 @@ export const Header: React.FC<HeaderProps> = ({
           <Plus size={20} />
           <span className="hidden sm:inline">Add Document</span>
         </button>
+
+        {/* Plan badge + doc counter */}
+        <div className="hidden sm:flex flex-col items-end gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider ${
+              plan === 'free' ? 'bg-gray-100 text-gray-600' :
+              plan === 'monthly' ? 'bg-blue-50 text-blue-600' :
+              'bg-purple-50 text-purple-600'
+            }`}>{plan}</span>
+            <span className={`text-xs font-bold ${isNearLimit ? 'text-red-500' : 'text-gray-500'}`}>
+              {docsUsed}/{docLimit} docs
+            </span>
+            {isNearLimit && (
+              <button onClick={onUpgradeClick} className="text-[10px] font-black text-white bg-blue-600 hover:bg-blue-700 px-2 py-0.5 rounded-full transition-colors">
+                Upgrade
+              </button>
+            )}
+          </div>
+          <div className="w-24 h-1 bg-gray-100 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${isNearLimit ? 'bg-red-500' : 'bg-blue-500'}`} style={{width: `${usagePercent}%`}} />
+          </div>
+        </div>
 
         <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden cursor-pointer shrink-0 shadow-sm">
           <img src={user.photoURL || ""} alt="Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
