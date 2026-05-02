@@ -1184,8 +1184,7 @@ _AI Tracker — Smart Document Intelligence_`;
           for (const doc of eligibleDocs) {
             log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
             try {
-              // Email reminder
-              // WhatsApp reminder
+              // WhatsApp reminder (always works via Twilio)
               if (user.whatsappPhone) {
                 try {
                   const emoji = days <= 1 ? "URGENT" : days <= 7 ? "WARNING" : "REMINDER";
@@ -1203,6 +1202,10 @@ _AI Tracker — Smart Document Intelligence_`;
                   console.error("[Reminders] WhatsApp failed:", waErr.message);
                 }
               }
+              // Email reminder (only if Resend domain verified or sending to owner)
+              const ownerEmail = process.env.RESEND_FROM_EMAIL || "himansh.cs91@gmail.com";
+              const canEmail = user.email === ownerEmail || user.email === process.env.SMTP_USER || process.env.RESEND_DOMAIN_VERIFIED === "true";
+              if (canEmail)
               await sendEmail({
                 to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
