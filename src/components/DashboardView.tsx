@@ -11,7 +11,7 @@ import {
   Bell
 } from "lucide-react";
 import { motion } from "motion/react";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Document } from "../types";
 import { cn } from "../lib/utils";
 
@@ -139,7 +139,7 @@ export function DashboardView({
                       {getStatus(doc.expiryDate)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500 font-medium">Expires on {format(new Date(doc.expiryDate), 'MMM dd, yyyy')}</p>
+                  <p className="text-sm text-gray-500 font-medium">Expires on {doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd-MM-yyyy') : 'N/A'}</p>
                 </div>
                 <button 
                   onClick={() => onRenew(doc)}
