@@ -135,7 +135,7 @@ async function sendWhatsApp(to: string, message: string) {
 }
 
 // ── Build WhatsApp Report Text ────────────────────────────────────────────────
-function buildWhatsAppReport(docs: any[], interval: number = 30, title = "📊 Document Status Report"): string {
+function buildWhatsAppReport(docs: any[], interval: number = 30, title: string = "Document Status Report"): string {
   const now = new Date();
   const expired = docs.filter(d => {
     const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
@@ -150,48 +150,36 @@ function buildWhatsAppReport(docs: any[], interval: number = 30, title = "📊 D
     return diff > interval || d.status === "Renewed";
   });
 
-  let msg = `🔐 *AI Tracker*
-${title}
-`;
-  msg += `📅 ${now.toLocaleDateString("en-IN")}
-
-`;
-  msg += `📈 *Summary:* ${docs.length} total | 🔴 ${expired.length} expired | ⚠️ ${expiring.length} expiring | ✅ ${safe.length} safe
-
-`;
+  const lines: string[] = [];
+  lines.push("AI Tracker - " + title);
+  lines.push("Date: " + now.toLocaleDateString("en-IN"));
+  lines.push("");
+  lines.push("Summary: " + docs.length + " total | " + expired.length + " expired | " + expiring.length + " expiring | " + safe.length + " safe");
+  lines.push("");
 
   if (expired.length > 0) {
-    msg += `🔴 *EXPIRED (Action Required):*
-`;
-    expired.slice(0, 5).forEach(d => { msg += `• ${d.title} — ${d.expiryDate}
-`; });
-    if (expired.length > 5) msg += `  ...and ${expired.length - 5} more
-`;
-    msg += "
-";
+    lines.push("EXPIRED (Action Required):");
+    expired.slice(0, 5).forEach((d: any) => lines.push("- " + d.title + " | " + d.expiryDate));
+    if (expired.length > 5) lines.push("  ...and " + (expired.length - 5) + " more");
+    lines.push("");
   }
   if (expiring.length > 0) {
-    msg += `⚠️ *EXPIRING SOON:*
-`;
-    expiring.slice(0, 5).forEach(d => {
+    lines.push("EXPIRING SOON:");
+    expiring.slice(0, 5).forEach((d: any) => {
       const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
-      msg += `• ${d.title} — ${d.expiryDate} (${diff} days)
-`;
+      lines.push("- " + d.title + " | " + d.expiryDate + " (" + diff + " days)");
     });
-    if (expiring.length > 5) msg += `  ...and ${expiring.length - 5} more
-`;
-    msg += "
-";
+    if (expiring.length > 5) lines.push("  ...and " + (expiring.length - 5) + " more");
+    lines.push("");
   }
   if (safe.length > 0) {
-    msg += `✅ *SAFE:* ${safe.slice(0, 3).map(d => d.title).join(", ")}`;
-    if (safe.length > 3) msg += ` +${safe.length - 3} more`;
-    msg += "
-
-";
+    const safeNames = safe.slice(0, 3).map((d: any) => d.title).join(", ");
+    const extra = safe.length > 3 ? " +" + (safe.length - 3) + " more" : "";
+    lines.push("SAFE: " + safeNames + extra);
+    lines.push("");
   }
-  msg += `🔗 https://ai-doc-expiry-tracker.onrender.com`;
-  return msg;
+  lines.push("Open app: https://ai-doc-expiry-tracker.onrender.com");
+  return lines.join("\n");
 }
 
 async function startServer() {
