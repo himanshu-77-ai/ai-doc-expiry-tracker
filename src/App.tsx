@@ -182,10 +182,14 @@ export default function App() {
     if (!user || !whatsappPhone) return;
     setIsSendingWhatsAppReport(true);
     try {
-      const res = await fetch("/api/notifications/whatsapp-report", {
+      const res = await fetch("/api/notifications/whatsapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.uid, phone: whatsappPhone })
+        body: JSON.stringify({ 
+          to: whatsappPhone, 
+          message: `📊 AI Tracker Report\n\nTotal: ${documents.length} docs\nExpired: ${stats.expired} | Expiring Soon: ${stats.expiring} | Safe: ${stats.safe}\n\nView: https://ai-doc-expiry-tracker.onrender.com`,
+          type: "whatsapp" 
+        })
       });
       if (res.ok) alert("WhatsApp report sent! 📱");
       else {
@@ -960,6 +964,7 @@ Track your document expiry dates with AI.
         handleLogout={handleLogout}
         userId={user?.uid}
         userData={userData}
+        isAdmin={user?.uid === ADMIN_UID}
       />
 
       {/* Main Content */}
@@ -1019,7 +1024,6 @@ Track your document expiry dates with AI.
           {activeTab === "settings" && (
             <SettingsView 
               user={user}
-              userData={userData}
               userData={userData}
               configStatus={configStatus}
               isRefreshingStatus={isRefreshingStatus}
