@@ -437,6 +437,7 @@ body: JSON.stringify({
   const [expiryInterval, setExpiryInterval] = useState<number | null>(null);
   const [filterCategory, setFilterCategory] = useState("All");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [renewModal, setRenewModal] = useState<{ doc: Document | null, value: string, error: string }>({ doc: null, value: "", error: "" });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [invitePhone, setInvitePhone] = useState("");
@@ -576,30 +577,29 @@ body: JSON.stringify({
     return getDynamicStatus(expiryDate, expiryInterval ?? 30);
   }, [expiryInterval]);
 
- const handleRenew = async (docObj: Document) => {
+ const handleRenew = (docObj: Document) => {
+    setRenewModal({ doc: docObj, value: "", error: "" });
+  };
+
+  const confirmRenew = async () => {
+    const { doc: docObj, value: newExpiry } = renewModal;
+    if (!docObj || !user) return;
+    let storedExpiry = newExpiry;
+    if (/^\d{2}-\d{2}-\d{4}$/.test(newExpiry)) {
+      const [dd, mm, yyyy] = newExpiry.split("-");
+      storedExpiry = `${yyyy}-${mm}-${dd}`;
+    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) {
+      setRenewModal(prev => ({ ...prev, error: "Invalid format. Please use DD-MM-YYYY (e.g. 25-04-2027)" }));
+      return;
+    }
     try {
-      if (!user) return;
-      const newExpiry = prompt(
-        `Enter new expiry date for "${docObj.title}" (DD-MM-YYYY):`,
-        ""
-      );
-      if (!newExpiry) return;
-      // Accept DD-MM-YYYY and convert to YYYY-MM-DD for storage
-      let storedExpiry = newExpiry;
-      if (/^\d{2}-\d{2}-\d{4}$/.test(newExpiry)) {
-        const [dd, mm, yyyy] = newExpiry.split("-");
-        storedExpiry = `${yyyy}-${mm}-${dd}`;
-      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) {
-        alert("Invalid format! Please use DD-MM-YYYY (e.g. 25-04-2027)");
-        return;
-      }
       const docRef = doc(db, "documents", docObj.id);
       await updateDoc(docRef, {
         status: 'Renewed',
         expiryDate: storedExpiry,
         updatedAt: serverTimestamp()
       });
-      alert(`Renewed! New expiry: ${newExpiry}`);
+      setRenewModal({ doc: null, value: "", error: "" });
     } catch (err) {
       console.error("Renew error:", err);
       setError("Failed to mark document as renewed.");
@@ -1230,7 +1230,7 @@ Track your document expiry dates with AI.
         onSave={async (data) => {
           if (!user) return;
 
-          // ── PLAN-BASED DOC LIMIT (uses component-level docLimit) ──
+          // ── PLAN-BASED DOC LIMIT ──
           if (documents.length >= docLimit) {
             setError(
               effectivePlanName === "free"
@@ -1239,7 +1239,22 @@ Track your document expiry dates with AI.
             );
             return;
           }
-          // ──────────────────────────────────────────────────────────
+
+          // ── DUPLICATE DOCUMENT CHECK ──
+          if (data.documentNumber && data.documentNumber.trim()) {
+            const duplicate = documents.find(
+              d => d.documentNumber && 
+                   d.documentNumber.trim().toLowerCase() === data.documentNumber.trim().toLowerCase() &&
+                   d.category === data.category
+            );
+            if (duplicate) {
+              const confirmDup = window.confirm(
+                `A document "${duplicate.title}" with the same document number already exists in ${duplicate.category}. Save anyway?`
+              );
+              if (!confirmDup) return;
+            }
+          }
+          // ─────────────────────────────
 
           setIsSavingDoc(true);
           setSaveStage('preparing');
@@ -1364,6 +1379,46 @@ Track your document expiry dates with AI.
         error={error}
         setError={setError}
       />
+
+      {/* Renew Modal — replaces browser prompt() for mobile compatibility */}
+      <AnimatePresence>
+        {renewModal.doc && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl space-y-6">
+              <h2 className="text-xl font-bold">Renew Document</h2>
+              <p className="text-gray-500 text-sm">Enter new expiry date for <strong>{renewModal.doc.title}</strong></p>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">New Expiry Date (DD-MM-YYYY)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 25-04-2027"
+                  value={renewModal.value}
+                  onChange={e => setRenewModal(prev => ({ ...prev, value: e.target.value, error: "" }))}
+                  onKeyDown={e => e.key === "Enter" && confirmRenew()}
+                  autoFocus
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 text-sm"
+                />
+                {renewModal.error && <p className="text-red-500 text-xs">{renewModal.error}</p>}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setRenewModal({ doc: null, value: "", error: "" })}
+                  className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmRenew}
+                  disabled={!renewModal.value}
+                  className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50"
+                >
+                  Renew
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Camera Modal */}
       <AnimatePresence>
@@ -1509,7 +1564,7 @@ Track your document expiry dates with AI.
               <div className="p-6 border-b border-gray-100 flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-bold">{selectedDoc.title}</h2>
-                  <p className="text-gray-500">{selectedDoc.category} • Expires {selectedDoc.expiryDate}</p>
+                  <p className="text-gray-500">{selectedDoc.category} • Expires {selectedDoc.expiryDate ? selectedDoc.expiryDate.split("-").reverse().join("-") : "N/A"}</p>
                 </div>
                 <div className="flex items-center gap-4">
                   {selectedDoc.fileUrl && (
