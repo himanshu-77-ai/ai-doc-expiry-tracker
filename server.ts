@@ -112,36 +112,86 @@ async function sendEmail({ from, to, subject, html, text }: {
   return data;
 }
 
-// ── Gmail SMTP (for invites — no domain verification needed) ─────────────────
-async function sendEmailSMTP({ to, subject, html, text }: {
-  to: string; subject: string; html?: string; text?: string;
-}) {
+// ── Gmail SMTP (invites — no domain needed) ──────────────────────────────────
+async function sendEmailSMTP({ to, subject, html }: { to: string; subject: string; html: string }) {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   if (!user || !pass) throw new Error("SMTP_USER or SMTP_PASS not configured");
   const nodemailer = await import("nodemailer");
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user, pass },
-  });
-  await transporter.sendMail({
-    from: `"AI Tracker" <${user}>`,
-    to,
-    subject,
-    html: html || text || "",
-  });
+  const transporter = nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
+  await transporter.sendMail({ from: `"AI Tracker" <${user}>`, to, subject, html });
 }
 
 // ── WhatsApp via Twilio ───────────────────────────────────────────────────────
 async function sendWhatsApp(to: string, message: string) {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
-  if (!sid || !token) throw new Error("Twilio not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.");
+  if (!sid || !token) throw new Error("Twilio not configured");
   const twilio = await import("twilio");
   const client = (twilio as any).default ? (twilio as any).default(sid, token) : (twilio as any)(sid, token);
   const from = process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886";
   const toWA = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
   return await client.messages.create({ from, to: toWA, body: message });
+}
+
+// ── Build WhatsApp Report Text ────────────────────────────────────────────────
+function buildWhatsAppReport(docs: any[], interval: number = 30, title = "📊 Document Status Report"): string {
+  const now = new Date();
+  const expired = docs.filter(d => {
+    const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
+    return diff < 0 && d.status !== "Renewed";
+  });
+  const expiring = docs.filter(d => {
+    const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
+    return diff >= 0 && diff <= interval && d.status !== "Renewed";
+  });
+  const safe = docs.filter(d => {
+    const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
+    return diff > interval || d.status === "Renewed";
+  });
+
+  let msg = `🔐 *AI Tracker*
+${title}
+`;
+  msg += `📅 ${now.toLocaleDateString("en-IN")}
+
+`;
+  msg += `📈 *Summary:* ${docs.length} total | 🔴 ${expired.length} expired | ⚠️ ${expiring.length} expiring | ✅ ${safe.length} safe
+
+`;
+
+  if (expired.length > 0) {
+    msg += `🔴 *EXPIRED (Action Required):*
+`;
+    expired.slice(0, 5).forEach(d => { msg += `• ${d.title} — ${d.expiryDate}
+`; });
+    if (expired.length > 5) msg += `  ...and ${expired.length - 5} more
+`;
+    msg += "
+";
+  }
+  if (expiring.length > 0) {
+    msg += `⚠️ *EXPIRING SOON:*
+`;
+    expiring.slice(0, 5).forEach(d => {
+      const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
+      msg += `• ${d.title} — ${d.expiryDate} (${diff} days)
+`;
+    });
+    if (expiring.length > 5) msg += `  ...and ${expiring.length - 5} more
+`;
+    msg += "
+";
+  }
+  if (safe.length > 0) {
+    msg += `✅ *SAFE:* ${safe.slice(0, 3).map(d => d.title).join(", ")}`;
+    if (safe.length > 3) msg += ` +${safe.length - 3} more`;
+    msg += "
+
+";
+  }
+  msg += `🔗 https://ai-doc-expiry-tracker.onrender.com`;
+  return msg;
 }
 
 async function startServer() {
@@ -775,24 +825,40 @@ async function startServer() {
     }
   });
 
-  // Invite Route — uses Resend (original working code)
+  // Invite Route — Email via SMTP + WhatsApp via Twilio
   app.post("/api/invites/send", async (req, res) => {
-    const { email, inviteLink } = req.body;
-    if (!email) return res.status(400).json({ error: "Missing email" });
+    const { email, phone, inviteLink, method = "email" } = req.body;
+    if (!inviteLink) return res.status(400).json({ error: "Missing inviteLink" });
+
     try {
-      await sendEmail({
-        to: email,
-        subject: "You have been invited to AI Tracker",
-        html: `
-          <div style="font-family: sans-serif; padding: 20px; max-width: 500px; color: #333;">
-            <h2 style="color: #2563EB;">Join AI Tracker 🔐</h2>
-            <p>You have been invited to collaborate on a document expiry tracking workspace.</p>
-            <a href="${inviteLink}" style="display: inline-block; margin: 16px 0; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a>
-            <p style="font-size: 13px; color: #555;">AI Tracker helps you manage and track important document expiry dates with AI-powered reminders.</p>
-            <p style="margin-top: 20px; font-size: 11px; color: #999;">If you did not expect this invitation, ignore this email.</p>
-          </div>
-        `,
-      });
+      if (method === "whatsapp" || method === "both") {
+        if (!phone) return res.status(400).json({ error: "Missing phone for WhatsApp invite" });
+        const waMsg = `🔐 *You are invited to AI Tracker!*
+
+Track your document expiry dates with AI-powered reminders.
+
+👉 Click to join:
+${inviteLink}
+
+_AI Tracker — Smart Document Intelligence_`;
+        await sendWhatsApp(phone, waMsg);
+      }
+      if (method === "email" || method === "both") {
+        if (!email) return res.status(400).json({ error: "Missing email" });
+        await sendEmailSMTP({
+          to: email,
+          subject: "You have been invited to AI Tracker",
+          html: `
+            <div style="font-family: sans-serif; padding: 20px; max-width: 500px; color: #333;">
+              <h2 style="color: #2563EB;">Join AI Tracker 🔐</h2>
+              <p>You have been invited to collaborate on a document expiry tracking workspace.</p>
+              <a href="${inviteLink}" style="display: inline-block; margin: 16px 0; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a>
+              <p style="font-size: 13px; color: #555;">AI Tracker helps you track important document expiry dates with AI-powered reminders.</p>
+              <p style="margin-top: 20px; font-size: 11px; color: #999;">If you did not expect this, ignore this email.</p>
+            </div>
+          `,
+        });
+      }
       res.json({ success: true });
     } catch (error: any) {
       console.error("Invite Error:", error);
@@ -800,7 +866,7 @@ async function startServer() {
     }
   });
 
-  // BUG-10: WhatsApp Send Route
+  // WhatsApp Send Route
   app.post("/api/notifications/whatsapp", async (req, res) => {
     const { to, message } = req.body;
     if (!to || !message) return res.status(400).json({ error: "Missing to or message" });
@@ -808,17 +874,42 @@ async function startServer() {
       await sendWhatsApp(to, message);
       res.json({ success: true });
     } catch (error: any) {
-      console.error("[WhatsApp] Send failed:", error.message);
+      console.error("[WhatsApp] Failed:", error.message);
       res.status(500).json({ error: "Failed to send WhatsApp", details: error.message });
     }
   });
 
-  // WhatsApp Status Check
+  // WhatsApp Status
   app.get("/api/notifications/whatsapp/status", async (req, res) => {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
     if (!sid || !token) return res.status(500).json({ configured: false, error: "Twilio not configured" });
     res.json({ configured: true, from: process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886" });
+  });
+
+  // Manual WhatsApp Report
+  app.post("/api/notifications/whatsapp-report", async (req, res) => {
+    const { userId, phone } = req.body;
+    if (!userId || !phone) return res.status(400).json({ error: "Missing userId or phone" });
+    try {
+      let docs: any[] = [];
+      let userPref: any = { expiryInterval: "30" };
+      if (db) {
+        const docsSnap = await db.collection("documents").where("userId", "==", userId).get();
+        docs = docsSnap.docs.map(d => d.data());
+        const userSnap = await db.collection("users").doc(userId).get();
+        if (userSnap.exists) userPref = userSnap.data();
+      } else {
+        docs = await firestoreRest("documents", { userId }) as any;
+      }
+      const interval = parseInt(userPref?.expiryInterval || "30");
+      const msg = buildWhatsAppReport(docs, interval);
+      await sendWhatsApp(phone, msg);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[WhatsApp Report]", error.message);
+      res.status(500).json({ error: "Failed to send WhatsApp report", details: error.message });
+    }
   });
 
   // Helper to get service account token using google-auth-library
@@ -1100,6 +1191,7 @@ async function startServer() {
           for (const doc of eligibleDocs) {
             log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
             try {
+              // Email reminder
               await sendEmail({
                 to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
@@ -1121,6 +1213,25 @@ async function startServer() {
                 `
               });
               sentCount++;
+
+              // WhatsApp reminder (if phone saved)
+              if (user.whatsappPhone) {
+                try {
+                  const emoji = days <= 1 ? "🚨" : days <= 7 ? "⚠️" : "📅";
+                  const waMsg = `${emoji} *AI Tracker Alert*
+
+*${doc.title}* expires in *${days} day${days > 1 ? "s" : ""}*!
+
+📅 Expiry: ${doc.expiryDate}
+📂 Type: ${doc.category}
+
+👉 Renew now:
+https://ai-doc-expiry-tracker.onrender.com`;
+                  await sendWhatsApp(user.whatsappPhone, waMsg);
+                } catch (waErr: any) {
+                  console.error(`[Reminders] WhatsApp failed for ${user.email}:`, waErr.message);
+                }
+              }
             } catch (mailErr) {
               console.error(`[Reminders] Mail send failed for ${user.email}:`, mailErr);
             }
@@ -1278,7 +1389,7 @@ async function startServer() {
 
   // Update User Profile
   app.post("/api/user/profile", async (req, res) => {
-    const { userId, displayName } = req.body;
+    const { userId, displayName, whatsappPhone } = req.body;
     const authHeader = req.headers.authorization;
     const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
 
@@ -1290,10 +1401,12 @@ async function startServer() {
       let success = false;
       if (db) {
         try {
-          await db.collection("users").doc(userId).set({
+          const profileUpdate: any = {
             displayName,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
+          };
+          if (whatsappPhone !== undefined) profileUpdate.whatsappPhone = whatsappPhone;
+          await db.collection("users").doc(userId).set(profileUpdate, { merge: true });
           success = true;
         } catch (adminErr: any) {
           console.warn("[Profile] Admin SDK failed, using REST fallback:", adminErr.message);
@@ -1560,6 +1673,22 @@ async function startServer() {
           </div>
         `
       });
+
+      // WhatsApp scheduled report (if phone saved)
+      try {
+        let userPhone = "";
+        if (db) {
+          const uSnap = await db.collection("users").doc(userId).get();
+          if (uSnap.exists) userPhone = uSnap.data()?.whatsappPhone || "";
+        }
+        if (userPhone) {
+          const waMsg = buildWhatsAppReport(docs as any[], interval, "📊 Scheduled Status Report");
+          await sendWhatsApp(userPhone, waMsg);
+          console.log(`[Scheduled Report] WhatsApp sent to ${userPhone}`);
+        }
+      } catch (waErr: any) {
+        console.error("[Scheduled Report] WhatsApp failed:", waErr.message);
+      }
 
       // Update lastSent
       const nowIso = new Date().toISOString();
