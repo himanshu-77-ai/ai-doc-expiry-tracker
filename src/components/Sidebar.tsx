@@ -23,6 +23,7 @@ interface SidebarProps {
   setIsSidebarOpen: (open: boolean) => void;
   handleLogout: () => void;
   userId?: string;
+  userData?: any;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -31,8 +32,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSidebarOpen, 
   setIsSidebarOpen, 
   handleLogout,
-  userId
+  userId,
+  userData
 }) => {
+  const isAdmin = userId === ADMIN_UID;
+  const features = userData?.features || {};
+  const hasReports = isAdmin || features.reports !== false;
+  const hasInvite = isAdmin || features.inviteFriend !== false;
+  const hasReminders = isAdmin || features.reminders !== false;
   const [isDesktop, setIsDesktop] = React.useState(typeof window !== 'undefined' && window.innerWidth >= 1024);
 
   React.useEffect(() => {
@@ -47,13 +54,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "dashboard",    label: "Dashboard",       icon: LayoutDashboard },
     { id: "documents",    label: "My Documents",     icon: FileText        },
     { id: "calendar",     label: "Expiry Calendar",  icon: Calendar        },
-    { id: "reminders",    label: "Reminders",        icon: Bell            },
-    { id: "reports",      label: "Status Reports",   icon: BarChart3       },
-    { id: "invite",       label: "Invite Friends",   icon: Share2          },
+    ...(hasReminders ? [{ id: "reminders",    label: "Reminders",       icon: Bell      }] : []),
+    ...(hasReports   ? [{ id: "reports",      label: "Status Reports",  icon: BarChart3 }] : []),
+    ...(hasInvite    ? [{ id: "invite",       label: "Invite Friends",  icon: Share2    }] : []),
     { id: "subscription", label: "Subscription",     icon: CreditCard      },
     { id: "settings",     label: "Settings",         icon: Settings        },
-    // Admin tab — sirf ADMIN_UID ko dikhega
-    ...(userId === ADMIN_UID ? [{ id: "admin", label: "Admin Panel", icon: Crown }] : []),
+    ...(isAdmin ? [{ id: "admin", label: "Admin Panel", icon: Crown }] : []),
   ];
 
   return (
