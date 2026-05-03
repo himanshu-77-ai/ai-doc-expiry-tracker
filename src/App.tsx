@@ -318,7 +318,7 @@ body: JSON.stringify({
     connectionType?: string
   } | null>(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
-  const [reportSettings, setReportSettings] = useState({ frequency: 'none', time: '09:00' });
+  const [reportSettings, setReportSettings] = useState({ frequency: 'none', time: '09:00', waFreq: 'none', waTime: '09:00' });
   const [upiSettings, setUpiSettings] = useState({ upiId: "", upiName: "" });
   const [isSavingUpi, setIsSavingUpi] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'stripe' | 'upi'>('razorpay');
