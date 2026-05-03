@@ -54,7 +54,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   onChange={(e) => setCurrentCalendarDate(new Date(parseInt(e.target.value), currentCalendarDate.getMonth(), 1))}
                   className="bg-transparent font-bold text-2xl outline-none cursor-pointer hover:text-blue-600 transition-colors"
                 >
-                  {Array.from({ length: 10 }).map((_, i) => {
+                  {Array.from({ length: 30 }).map((_, i) => {
                     const year = new Date().getFullYear() - 5 + i;
                     return <option key={year} value={year}>{year}</option>;
                   })}
