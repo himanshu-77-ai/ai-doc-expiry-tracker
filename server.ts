@@ -833,16 +833,28 @@ _AI Tracker — Smart Document Intelligence_`;
       }
       if (method === "email" || method === "both") {
         if (!email) return res.status(400).json({ error: "Missing email" });
-        await sendEmail({
+        // FIXED: Use SMTP (Gmail) instead of Resend — no domain verification needed
+        await sendEmailSMTP({
           to: email,
-          subject: "You have been invited to AI Tracker",
+          subject: "You have been invited to AI Tracker 🔐",
           html: `
-            <div style="font-family: sans-serif; padding: 20px; max-width: 500px; color: #333;">
-              <h2 style="color: #2563EB;">Join AI Tracker 🔐</h2>
-              <p>You have been invited to collaborate on a document expiry tracking workspace.</p>
-              <a href="${inviteLink}" style="display: inline-block; margin: 16px 0; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a>
-              <p style="font-size: 13px; color: #555;">AI Tracker helps you track important document expiry dates with AI-powered reminders.</p>
-              <p style="margin-top: 20px; font-size: 11px; color: #999;">If you did not expect this, ignore this email.</p>
+            <div style="font-family: sans-serif; padding: 32px 20px; max-width: 520px; margin: 0 auto; color: #333; background: #fff; border-radius: 16px; border: 1px solid #eee;">
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="width: 56px; height: 56px; background: #EFF6FF; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 28px;">🔐</div>
+              </div>
+              <h2 style="color: #1E40AF; text-align: center; margin: 0 0 8px;">You're Invited to AI Tracker!</h2>
+              <p style="text-align: center; color: #6B7280; margin: 0 0 28px;">You've been invited to collaborate on a document expiry tracking workspace.</p>
+              <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+                <p style="margin: 0; font-size: 14px; color: #166534;">✅ Track important documents — Passport, Insurance, Licenses & more</p>
+                <p style="margin: 8px 0 0; font-size: 14px; color: #166534;">✅ Get AI-powered expiry reminders before it's too late</p>
+                <p style="margin: 8px 0 0; font-size: 14px; color: #166534;">✅ Collaborate with your team on shared documents</p>
+              </div>
+              <div style="text-align: center; margin-bottom: 24px;">
+                <a href="${inviteLink}" style="display: inline-block; padding: 14px 32px; background: #2563EB; color: white; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px; letter-spacing: 0.3px;">Accept Invitation →</a>
+              </div>
+              <p style="font-size: 12px; color: #9CA3AF; text-align: center; margin: 0;">Or copy this link: <a href="${inviteLink}" style="color: #2563EB;">${inviteLink}</a></p>
+              <hr style="border: none; border-top: 1px solid #F3F4F6; margin: 24px 0;" />
+              <p style="font-size: 11px; color: #D1D5DB; text-align: center; margin: 0;">AI Tracker — Smart Document Intelligence. If you didn't expect this email, you can safely ignore it.</p>
             </div>
           `,
         });
@@ -1203,9 +1215,8 @@ _AI Tracker — Smart Document Intelligence_`;
                 }
               }
               // Email reminder (only if Resend domain verified or sending to owner)
-              const ownerEmail = process.env.RESEND_FROM_EMAIL || "himansh.cs91@gmail.com";
-              const canEmail = user.email === ownerEmail || user.email === process.env.SMTP_USER || process.env.RESEND_DOMAIN_VERIFIED === "true";
-              if (canEmail)
+              // FIXED: Send to all users via SMTP (not Resend sandbox)
+              // SMTP_USER configured = can send to anyone
               await sendEmail({
                 to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
