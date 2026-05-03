@@ -1479,7 +1479,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Update User Report Settings
   app.post("/api/user/report-settings", async (req, res) => {
-    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone } = req.body;
+    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime } = req.body;
     const authHeader = req.headers.authorization;
     const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
 
@@ -1499,6 +1499,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
           if (displayName) updateData.displayName = displayName;
           if (photoURL) updateData.photoURL = photoURL;
           if (whatsappPhone || phone) updateData.whatsappPhone = whatsappPhone || phone;
+          if (waFreq !== undefined) updateData.waReportFreq = waFreq;
+          if (waTime !== undefined) updateData.waReportTime = waTime;
 
           await db.collection("users").doc(userId).set(updateData, { merge: true });
           success = true;
@@ -1635,7 +1637,9 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const reportData = userData?.reportSettings || { frequency: "none", time: "09:00" };
       res.json({
         ...reportData,
-        expiryInterval: userData?.expiryInterval || "30"
+        expiryInterval: userData?.expiryInterval || "30",
+        waFreq: userData?.waReportFreq || "none",
+        waTime: userData?.waReportTime || "09:00",
       });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch settings" });
@@ -1676,16 +1680,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `;
       }).join("") : '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #666;">No documents found</td></tr>';
 
-      // Skip if Resend not configured for this recipient (domain not verified)
-      const resendOwnerEmail = process.env.RESEND_FROM_EMAIL || "himansh.cs91@gmail.com";
-      const canSendToThisUser = email === resendOwnerEmail || 
-                                 email === process.env.SMTP_USER ||
-                                 process.env.RESEND_DOMAIN_VERIFIED === "true";
-      if (!canSendToThisUser) {
-        console.log(`[Scheduled Report] Skipping ${email} — Resend domain not verified yet. Verify at resend.com/domains`);
-        // Still send WhatsApp if phone available
-      } else
-      await sendEmail({
+      // FIXED: Use SMTP — sends to ALL users, no domain needed
+      await sendEmailSMTP({
         to: email,
         subject: "AI Tracker - Scheduled Status Report",
         html: `
@@ -1857,6 +1853,48 @@ https://ai-doc-expiry-tracker.onrender.com`;
             console.log(`[Cron] Report sent to ${user.email}`);
           } catch (err: any) {
             console.error(`[Cron] Report failed for ${user.id}:`, err.message);
+          }
+        }
+
+        // ── WhatsApp Schedule (separate from email — waReportFreq/waReportTime) ──
+        const waPhone = user.whatsappPhone || user.waReportPhone || "";
+        const waFreq  = user.waReportFreq  || settings.frequency || "";
+        const waTime  = user.waReportTime  || "";
+
+        if (waPhone && waFreq && waTime) {
+          const [waH, waM] = waTime.split(":");
+          if (waH === currentHour && waM === currentMinute) {
+            const waLastSent = user.waLastSent ? new Date(user.waLastSent) : null;
+            let waShouldSend = !waLastSent;
+            if (waLastSent) {
+              const waDiff = (now.getTime() - waLastSent.getTime()) / (1000 * 60 * 60 * 24);
+              if (waFreq === "daily"   && waDiff >= 0.9)  waShouldSend = true;
+              if (waFreq === "weekly"  && waDiff >= 6.9)  waShouldSend = true;
+              if (waFreq === "monthly" && waDiff >= 27.9) waShouldSend = true;
+            }
+            if (waShouldSend) {
+              try {
+                // Fetch docs for this user
+                let waDocs: any[] = [];
+                if (db) {
+                  const snap = await db.collection("documents").where("userId", "==", user.id).get();
+                  waDocs = snap.docs.map(d => d.data());
+                }
+                const waMsg = buildWhatsAppReport(
+                  waDocs,
+                  parseInt(user.expiryInterval || "30"),
+                  "📊 Scheduled WhatsApp Report"
+                );
+                await sendWhatsApp(waPhone, waMsg);
+                // Update waLastSent
+                if (db) {
+                  await db.collection("users").doc(user.id).update({ waLastSent: now.toISOString() });
+                }
+                console.log(`[Cron] WhatsApp report sent to ${waPhone} (${waFreq})`);
+              } catch (waErr: any) {
+                console.error(`[Cron] WhatsApp report failed for ${user.id}:`, waErr.message);
+              }
+            }
           }
         }
       }
