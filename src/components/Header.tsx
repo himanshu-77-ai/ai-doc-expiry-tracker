@@ -80,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Plan badge + doc counter */}
-        <div className="hidden sm:flex flex-col items-end gap-0.5">
+        <div className="flex flex-col items-end gap-0.5">
           <div className="flex items-center gap-2">
             <span className={`px-2 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider ${
               plan === 'free' ? 'bg-gray-100 text-gray-600' :
