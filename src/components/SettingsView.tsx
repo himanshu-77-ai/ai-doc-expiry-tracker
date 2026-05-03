@@ -370,7 +370,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2"
                 >
                   {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                  Save Schedule
+                  Save Email Schedule
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── WhatsApp Auto Report Schedule ── */}
+          <div className="pt-8 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">WhatsApp Report Schedule</h3>
+                <p className="text-sm text-gray-500">Automatically receive document status reports on WhatsApp — daily, weekly or monthly.</p>
+              </div>
+              <span className="text-2xl">📱</span>
+            </div>
+            <div className="bg-green-50 p-6 rounded-2xl space-y-6">
+              <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-green-100">
+                <span className="text-green-600">📞</span>
+                <div>
+                  <p className="text-xs text-gray-500 font-medium">WhatsApp Number</p>
+                  <p className="text-sm font-bold text-gray-900">
+                    {localPhone || userData?.whatsappPhone || <span className="text-gray-400 font-normal">Not set — add in Account Settings above</span>}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-700">Frequency</label>
+                  <select
+                    value={reportSettings.waFreq || "none"}
+                    onChange={(e) => setReportSettings((prev: any) => ({ ...prev, waFreq: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-green-500/20"
+                  >
+                    <option value="none">Paused</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-700">Preferred Time</label>
+                  <input
+                    type="time"
+                    value={reportSettings.waTime || "09:00"}
+                    onChange={(e) => setReportSettings((prev: any) => ({ ...prev, waTime: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-green-500/20"
+                  />
+                </div>
+              </div>
+              {(!localPhone && !userData?.whatsappPhone) && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3">
+                  ⚠️ Save your WhatsApp number in Account Settings above first to enable auto reports.
+                </p>
+              )}
+              <div className="flex justify-end">
+                <button
+                  onClick={onSaveReportSettings}
+                  disabled={isSavingSettings}
+                  className="px-6 py-2 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                  Save WhatsApp Schedule
                 </button>
               </div>
             </div>
