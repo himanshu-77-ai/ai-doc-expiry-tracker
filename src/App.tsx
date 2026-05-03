@@ -609,9 +609,9 @@ body: JSON.stringify({
   // Optimized stats and filtering
   const stats = useMemo(() => ({
     total: documents.length,
-    safe: documents.filter(d => getStatus(d.expiryDate) === 'Safe' || d.status === 'Renewed').length,
+    safe: documents.filter(d => d.status === 'Renewed' || getStatus(d.expiryDate) === 'Safe').length,
     expiring: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expiring Soon').length,
-    expired: documents.filter(d => getStatus(d.expiryDate) === 'Expired').length,
+    expired: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expired').length,
   }), [documents, getStatus]);
 
   // ── Component-level plan & limit (used by Header + handleSaveDocument) ──
@@ -1143,6 +1143,9 @@ Track your document expiry dates with AI.
               setInvitePhone={setInvitePhone}
               isSendingInvite={isSendingInvite}
               onSendInvite={sendInvite}
+              documents={documents}
+              stats={stats}
+              userEmail={user?.email || ""}
             />
           )}
           {activeTab === "calendar" && (
@@ -1240,19 +1243,29 @@ Track your document expiry dates with AI.
             return;
           }
 
-          // ── DUPLICATE DOCUMENT CHECK ──
-          if (data.documentNumber && data.documentNumber.trim()) {
-            const duplicate = documents.find(
-              d => d.documentNumber && 
-                   d.documentNumber.trim().toLowerCase() === data.documentNumber.trim().toLowerCase() &&
-                   d.category === data.category
+          // ── DUPLICATE DOCUMENT CHECK (title+date + docNumber) ──
+          const dupByDocNumber = (data.documentNumber && data.documentNumber.trim())
+            ? documents.find(d =>
+                d.documentNumber &&
+                d.documentNumber.trim().toLowerCase() === data.documentNumber.trim().toLowerCase() &&
+                d.category === data.category
+              )
+            : null;
+          const dupByTitleDate = documents.find(d =>
+            d.title.trim().toLowerCase() === data.title.trim().toLowerCase() &&
+            d.expiryDate === data.expiryDate
+          );
+          const duplicateDoc = dupByDocNumber || dupByTitleDate;
+          if (duplicateDoc) {
+            const reason = dupByDocNumber
+              ? `document number "${data.documentNumber}" in the "${data.category}" category`
+              : `same title and expiry date (${data.expiryDate})`;
+            const confirmDup = window.confirm(
+              `⚠️ Duplicate Document Detected\n\n` +
+              `"${duplicateDoc.title}" already exists with the ${reason}.\n\n` +
+              `Click OK to save anyway, or Cancel to go back and review.`
             );
-            if (duplicate) {
-              const confirmDup = window.confirm(
-                `A document "${duplicate.title}" with the same document number already exists in ${duplicate.category}. Save anyway?`
-              );
-              if (!confirmDup) return;
-            }
+            if (!confirmDup) return;
           }
           // ─────────────────────────────
 
