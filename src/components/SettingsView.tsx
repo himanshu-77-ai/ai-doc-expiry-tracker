@@ -47,6 +47,7 @@ interface SettingsViewProps {
   isTestingStorage: boolean;
   onTestStorage: () => void;
   userData?: any;
+  isAdmin?: boolean;
   whatsappPhone: string;
   setWhatsappPhone: (v: string) => void;
   isSendingWhatsAppReport: boolean;
@@ -82,6 +83,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isTestingStorage,
   onTestStorage,
   userData,
+  isAdmin = false,
   whatsappPhone,
   setWhatsappPhone,
   isSendingWhatsAppReport,
@@ -302,14 +304,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {isSendingReport ? <Loader2 className="animate-spin" size={18} /> : "Send Full Status Report"}
               </button>
 
-              <button 
-                disabled={isTestingStorage}
-                onClick={onTestStorage}
-                className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-500/20 disabled:opacity-50 flex items-center gap-2"
-              >
-                {isTestingStorage ? <Loader2 className="animate-spin" size={18} /> : <Globe size={18} />}
-                Test Storage Connection
-              </button>
+              {/* Test Storage — Admin only */}
+              {isAdmin && (
+                <button 
+                  disabled={isTestingStorage}
+                  onClick={onTestStorage}
+                  className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-500/20 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isTestingStorage ? <Loader2 className="animate-spin" size={18} /> : <Globe size={18} />}
+                  Test Storage Connection
+                </button>
+              )}
 
               <button
                 disabled={isSendingWhatsAppReport || !whatsappPhone}
@@ -433,6 +438,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {isSavingSettings ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
                   Save WhatsApp Schedule
                 </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Support Section ── */}
+          <div className="pt-8 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Help & Support</h3>
+                <p className="text-sm text-gray-500">Need help? Contact our support team.</p>
+              </div>
+              <span className="text-2xl">🛟</span>
+            </div>
+            <div className="bg-blue-50 p-6 rounded-2xl space-y-4">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center shrink-0">
+                  <span className="text-lg">📧</span>
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900 text-sm">Email Support</p>
+                  <p className="text-xs text-gray-500 mb-2">We typically respond within 24 hours</p>
+                  <a
+                    href="mailto:himansh.cs91@gmail.com?subject=AI Tracker Support Request&body=User ID: ${user?.uid}%0AEmail: ${user?.email}%0A%0ADescribe your issue:"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all"
+                  >
+                    📧 Contact Support
+                  </a>
+                </div>
+              </div>
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+                  <span className="text-lg">💬</span>
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900 text-sm">WhatsApp Support</p>
+                  <p className="text-xs text-gray-500 mb-2">Quick support via WhatsApp</p>
+                  <a
+                    href="https://wa.me/917210033172?text=Hi, I need help with AI Tracker. My email is ${encodeURIComponent(user?.email || '')}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-xl text-sm font-bold hover:bg-green-600 transition-all"
+                  >
+                    💬 WhatsApp Support
+                  </a>
+                </div>
               </div>
             </div>
           </div>
