@@ -116,10 +116,21 @@ async function sendEmail({ from, to, subject, html, text }: {
 async function sendEmailSMTP({ to, subject, html }: { to: string; subject: string; html: string }) {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
+  const host = process.env.SMTP_HOST || "smtp-relay.brevo.com";
   if (!user || !pass) throw new Error("SMTP_USER or SMTP_PASS not configured");
   const nodemailer = await import("nodemailer");
-  const transporter = nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
-  await transporter.sendMail({ from: `"AI Tracker" <${user}>`, to, subject, html });
+  const transporter = nodemailer.createTransport({
+    host,
+    port: 587,
+    secure: false,
+    auth: { user, pass }
+  });
+  await transporter.sendMail({
+    from: `"AI Tracker" <${process.env.RESEND_FROM_EMAIL || user}>`,
+    to,
+    subject,
+    html
+  });
 }
 
 // ── WhatsApp via Twilio ───────────────────────────────────────────────────────
@@ -805,7 +816,7 @@ async function startServer() {
   app.post("/api/notifications/send-email", async (req, res) => {
     const { to, subject, text, html } = req.body;
     try {
-      await sendEmailSMTP({ to, subject, html: html || text });
+      await sendEmail({ to, subject, html: html || text });
       res.json({ success: true });
     } catch (error: any) {
       console.error("Email Error:", error);
@@ -821,40 +832,29 @@ async function startServer() {
     try {
       if (method === "whatsapp" || method === "both") {
         if (!phone) return res.status(400).json({ error: "Missing phone for WhatsApp invite" });
-        const waMsg = `🔐 *You are invited to AI Tracker!*
-
-Track your document expiry dates with AI-powered reminders.
-
-👉 Click to join:
-${inviteLink}
-
-_AI Tracker — Smart Document Intelligence_`;
+        const waMsg = [
+          "You are invited to AI Tracker!",
+          "",
+          "Track your document expiry dates with AI-powered reminders.",
+          "",
+          "Join here: " + inviteLink,
+          "",
+          "AI Tracker - Smart Document Intelligence"
+        ].join("\n");
         await sendWhatsApp(phone, waMsg);
       }
       if (method === "email" || method === "both") {
         if (!email) return res.status(400).json({ error: "Missing email" });
-        // FIXED: Use SMTP (Gmail) instead of Resend — no domain verification needed
-        await sendEmailSMTP({
+        await sendEmail({
           to: email,
-          subject: "You have been invited to AI Tracker 🔐",
+          subject: "You have been invited to AI Tracker",
           html: `
-            <div style="font-family: sans-serif; padding: 32px 20px; max-width: 520px; margin: 0 auto; color: #333; background: #fff; border-radius: 16px; border: 1px solid #eee;">
-              <div style="text-align: center; margin-bottom: 24px;">
-                <div style="width: 56px; height: 56px; background: #EFF6FF; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 28px;">🔐</div>
-              </div>
-              <h2 style="color: #1E40AF; text-align: center; margin: 0 0 8px;">You're Invited to AI Tracker!</h2>
-              <p style="text-align: center; color: #6B7280; margin: 0 0 28px;">You've been invited to collaborate on a document expiry tracking workspace.</p>
-              <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
-                <p style="margin: 0; font-size: 14px; color: #166534;">✅ Track important documents — Passport, Insurance, Licenses & more</p>
-                <p style="margin: 8px 0 0; font-size: 14px; color: #166534;">✅ Get AI-powered expiry reminders before it's too late</p>
-                <p style="margin: 8px 0 0; font-size: 14px; color: #166534;">✅ Collaborate with your team on shared documents</p>
-              </div>
-              <div style="text-align: center; margin-bottom: 24px;">
-                <a href="${inviteLink}" style="display: inline-block; padding: 14px 32px; background: #2563EB; color: white; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px; letter-spacing: 0.3px;">Accept Invitation →</a>
-              </div>
-              <p style="font-size: 12px; color: #9CA3AF; text-align: center; margin: 0;">Or copy this link: <a href="${inviteLink}" style="color: #2563EB;">${inviteLink}</a></p>
-              <hr style="border: none; border-top: 1px solid #F3F4F6; margin: 24px 0;" />
-              <p style="font-size: 11px; color: #D1D5DB; text-align: center; margin: 0;">AI Tracker — Smart Document Intelligence. If you didn't expect this email, you can safely ignore it.</p>
+            <div style="font-family: sans-serif; padding: 20px; max-width: 500px; color: #333;">
+              <h2 style="color: #2563EB;">Join AI Tracker 🔐</h2>
+              <p>You have been invited to collaborate on a document expiry tracking workspace.</p>
+              <a href="${inviteLink}" style="display: inline-block; margin: 16px 0; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a>
+              <p style="font-size: 13px; color: #555;">AI Tracker helps you track important document expiry dates with AI-powered reminders.</p>
+              <p style="margin-top: 20px; font-size: 11px; color: #999;">If you did not expect this, ignore this email.</p>
             </div>
           `,
         });
@@ -1214,7 +1214,7 @@ _AI Tracker — Smart Document Intelligence_`;
                   console.error("[Reminders] WhatsApp failed:", waErr.message);
                 }
               }
-              // FIXED: SMTP — sends to ALL users, no domain needed
+              // Email reminder via Brevo SMTP (works for all users)
               await sendEmailSMTP({
                 to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
@@ -1295,7 +1295,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Missing email" });
       try {
-        await sendEmailSMTP({
+        await sendEmail({
           to: email,
           subject: "AI Tracker - Test Email ✅",
           html: "<div style='font-family:sans-serif;padding:20px'><h2 style='color:#2563EB'>Test Successful!</h2><p>Your AI Tracker email notifications are working correctly.</p></div>",
@@ -1350,7 +1350,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       console.log(`[Report] Found ${docs.length} documents. Using interval: ${interval}`);
       if (docs.length === 0) {
-        await sendEmailSMTP({
+        await sendEmail({
           to: email,
           subject: "AI Tracker - Document Status Report",
           html: `
@@ -1378,8 +1378,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `;
       }).join("");
 
-      // FIXED: Use SMTP — no Resend domain restriction
-      await sendEmailSMTP({
+      await sendEmail({
         to: email,
         subject: "AI Tracker - Document Status Report",
         html: `
@@ -1391,15 +1390,15 @@ https://ai-doc-expiry-tracker.onrender.com`;
                 <tr style="background: #F9FAFB; text-align: left;">
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Document</th>
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Category</th>
-                  <th style="padding: 12px; border-bottom: 2px solid #eee;">Expiry Date</th>
+                  <th style="padding: 12px; border-bottom: 2px solid #eee;">Expiry</th>
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Status</th>
                 </tr>
               </thead>
               <tbody>${tableRows}</tbody>
             </table>
-            <p style="font-size: 13px; color: #666;">Generated on ${fmtDate(new Date().toISOString())}</p>
+            <p style="font-size: 13px; color: #666;">Generated on ${new Date().toLocaleString()}</p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker — Smart Document Intelligence</p>
+            <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker</p>
           </div>
         `
       });
@@ -1478,7 +1477,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Update User Report Settings
   app.post("/api/user/report-settings", async (req, res) => {
-    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime } = req.body;
+    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone } = req.body;
     const authHeader = req.headers.authorization;
     const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
 
@@ -1498,8 +1497,6 @@ https://ai-doc-expiry-tracker.onrender.com`;
           if (displayName) updateData.displayName = displayName;
           if (photoURL) updateData.photoURL = photoURL;
           if (whatsappPhone || phone) updateData.whatsappPhone = whatsappPhone || phone;
-          if (waFreq !== undefined) updateData.waReportFreq = waFreq;
-          if (waTime !== undefined) updateData.waReportTime = waTime;
 
           await db.collection("users").doc(userId).set(updateData, { merge: true });
           success = true;
@@ -1636,9 +1633,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const reportData = userData?.reportSettings || { frequency: "none", time: "09:00" };
       res.json({
         ...reportData,
-        expiryInterval: userData?.expiryInterval || "30",
-        waFreq: userData?.waReportFreq || "none",
-        waTime: userData?.waReportTime || "09:00",
+        expiryInterval: userData?.expiryInterval || "30"
       });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch settings" });
@@ -1679,7 +1674,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `;
       }).join("") : '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #666;">No documents found</td></tr>';
 
-      // FIXED: Use SMTP — sends to ALL users, no domain needed
+      // Send via Brevo SMTP (no domain verification needed)
       await sendEmailSMTP({
         to: email,
         subject: "AI Tracker - Scheduled Status Report",
@@ -1826,83 +1821,32 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       users = await tryFetchUsers();
       
-      // Include users with EITHER email schedule OR WhatsApp schedule
       const eligibleUsers = users.filter(u => {
         const s = u.reportSettings;
-        const hasEmailSchedule = s && s.frequency && s.frequency !== "none" && s.time;
-        const hasWaSchedule = u.waReportFreq && u.waReportFreq !== "none" && u.waReportTime;
-        return hasEmailSchedule || hasWaSchedule;
+        return s && s.frequency !== "none" && s.time;
       });
 
       for (const user of eligibleUsers) {
-        const settings = user.reportSettings || {};
+        const settings = user.reportSettings;
+        const [targetH, targetM] = settings.time.split(":");
+        if (targetH !== currentHour || targetM !== currentMinute) continue;
 
-        // ── EMAIL Schedule ──────────────────────────────────────────────
-        const emailFreq = settings.frequency;
-        const emailTime = settings.time;
-        const hasEmail  = emailFreq && emailFreq !== "none" && emailTime;
+        const lastSent = settings.lastSent ? new Date(settings.lastSent) : null;
+        let shouldSend = !lastSent;
 
-        if (hasEmail) {
-          const [targetH, targetM] = emailTime.split(":");
-          if (targetH === currentHour && targetM === currentMinute) {
-            const lastSent = settings.lastSent ? new Date(settings.lastSent) : null;
-            let shouldSend = !lastSent;
-            if (lastSent) {
-              const diffDays = (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60 * 24);
-              if (emailFreq === "daily"   && diffDays >= 0.9)  shouldSend = true;
-              else if (emailFreq === "weekly"  && diffDays >= 6.9)  shouldSend = true;
-              else if (emailFreq === "monthly" && diffDays >= 27.9) shouldSend = true;
-            }
-            if (shouldSend) {
-              try {
-                await sendScheduledReport(user.id, user.email, user.expiryInterval);
-                console.log(`[Cron] Email report sent to ${user.email} (${emailFreq})`);
-              } catch (err: any) {
-                console.error(`[Cron] Email report failed for ${user.id}:`, err.message);
-              }
-            }
-          }
+        if (lastSent) {
+          const diffDays = (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60 * 24);
+          if (settings.frequency === "daily" && diffDays >= 0.9) shouldSend = true;
+          else if (settings.frequency === "weekly" && diffDays >= 6.9) shouldSend = true;
+          else if (settings.frequency === "monthly" && diffDays >= 27.9) shouldSend = true;
         }
 
-        // ── WhatsApp Schedule (independent of email) ────────────────────
-        const waPhone = user.whatsappPhone || user.waReportPhone || "";
-        const waFreq  = user.waReportFreq || "";
-        const waTime  = user.waReportTime || "";
-
-        if (waPhone && waFreq && waTime) {
-          const [waH, waM] = waTime.split(":");
-          if (waH === currentHour && waM === currentMinute) {
-            const waLastSent = user.waLastSent ? new Date(user.waLastSent) : null;
-            let waShouldSend = !waLastSent;
-            if (waLastSent) {
-              const waDiff = (now.getTime() - waLastSent.getTime()) / (1000 * 60 * 60 * 24);
-              if (waFreq === "daily"   && waDiff >= 0.9)  waShouldSend = true;
-              if (waFreq === "weekly"  && waDiff >= 6.9)  waShouldSend = true;
-              if (waFreq === "monthly" && waDiff >= 27.9) waShouldSend = true;
-            }
-            if (waShouldSend) {
-              try {
-                // Fetch docs for this user
-                let waDocs: any[] = [];
-                if (db) {
-                  const snap = await db.collection("documents").where("userId", "==", user.id).get();
-                  waDocs = snap.docs.map(d => d.data());
-                }
-                const waMsg = buildWhatsAppReport(
-                  waDocs,
-                  parseInt(user.expiryInterval || "30"),
-                  "📊 Scheduled WhatsApp Report"
-                );
-                await sendWhatsApp(waPhone, waMsg);
-                // Update waLastSent
-                if (db) {
-                  await db.collection("users").doc(user.id).update({ waLastSent: now.toISOString() });
-                }
-                console.log(`[Cron] WhatsApp report sent to ${waPhone} (${waFreq})`);
-              } catch (waErr: any) {
-                console.error(`[Cron] WhatsApp report failed for ${user.id}:`, waErr.message);
-              }
-            }
+        if (shouldSend) {
+          try {
+            await sendScheduledReport(user.id, user.email, user.expiryInterval);
+            console.log(`[Cron] Report sent to ${user.email}`);
+          } catch (err: any) {
+            console.error(`[Cron] Report failed for ${user.id}:`, err.message);
           }
         }
       }
