@@ -805,7 +805,7 @@ async function startServer() {
   app.post("/api/notifications/send-email", async (req, res) => {
     const { to, subject, text, html } = req.body;
     try {
-      await sendEmail({ to, subject, html: html || text });
+      await sendEmailSMTP({ to, subject, html: html || text });
       res.json({ success: true });
     } catch (error: any) {
       console.error("Email Error:", error);
@@ -1214,10 +1214,8 @@ _AI Tracker — Smart Document Intelligence_`;
                   console.error("[Reminders] WhatsApp failed:", waErr.message);
                 }
               }
-              // Email reminder (only if Resend domain verified or sending to owner)
-              // FIXED: Send to all users via SMTP (not Resend sandbox)
-              // SMTP_USER configured = can send to anyone
-              await sendEmail({
+              // FIXED: SMTP — sends to ALL users, no domain needed
+              await sendEmailSMTP({
                 to: user.email,
                 subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
                 html: `
@@ -1297,7 +1295,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Missing email" });
       try {
-        await sendEmail({
+        await sendEmailSMTP({
           to: email,
           subject: "AI Tracker - Test Email ✅",
           html: "<div style='font-family:sans-serif;padding:20px'><h2 style='color:#2563EB'>Test Successful!</h2><p>Your AI Tracker email notifications are working correctly.</p></div>",
@@ -1352,7 +1350,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       console.log(`[Report] Found ${docs.length} documents. Using interval: ${interval}`);
       if (docs.length === 0) {
-        await sendEmail({
+        await sendEmailSMTP({
           to: email,
           subject: "AI Tracker - Document Status Report",
           html: `
@@ -1380,7 +1378,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `;
       }).join("");
 
-      await sendEmail({
+      // FIXED: Use SMTP — no Resend domain restriction
+      await sendEmailSMTP({
         to: email,
         subject: "AI Tracker - Document Status Report",
         html: `
@@ -1392,15 +1391,15 @@ https://ai-doc-expiry-tracker.onrender.com`;
                 <tr style="background: #F9FAFB; text-align: left;">
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Document</th>
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Category</th>
-                  <th style="padding: 12px; border-bottom: 2px solid #eee;">Expiry</th>
+                  <th style="padding: 12px; border-bottom: 2px solid #eee;">Expiry Date</th>
                   <th style="padding: 12px; border-bottom: 2px solid #eee;">Status</th>
                 </tr>
               </thead>
               <tbody>${tableRows}</tbody>
             </table>
-            <p style="font-size: 13px; color: #666;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size: 13px; color: #666;">Generated on ${fmtDate(new Date().toISOString())}</p>
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker</p>
+            <p style="font-size: 12px; color: #999; text-align: center;">AI Tracker — Smart Document Intelligence</p>
           </div>
         `
       });
@@ -1827,39 +1826,48 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       users = await tryFetchUsers();
       
+      // Include users with EITHER email schedule OR WhatsApp schedule
       const eligibleUsers = users.filter(u => {
         const s = u.reportSettings;
-        return s && s.frequency !== "none" && s.time;
+        const hasEmailSchedule = s && s.frequency && s.frequency !== "none" && s.time;
+        const hasWaSchedule = u.waReportFreq && u.waReportFreq !== "none" && u.waReportTime;
+        return hasEmailSchedule || hasWaSchedule;
       });
 
       for (const user of eligibleUsers) {
-        const settings = user.reportSettings;
-        const [targetH, targetM] = settings.time.split(":");
-        if (targetH !== currentHour || targetM !== currentMinute) continue;
+        const settings = user.reportSettings || {};
 
-        const lastSent = settings.lastSent ? new Date(settings.lastSent) : null;
-        let shouldSend = !lastSent;
+        // ── EMAIL Schedule ──────────────────────────────────────────────
+        const emailFreq = settings.frequency;
+        const emailTime = settings.time;
+        const hasEmail  = emailFreq && emailFreq !== "none" && emailTime;
 
-        if (lastSent) {
-          const diffDays = (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60 * 24);
-          if (settings.frequency === "daily" && diffDays >= 0.9) shouldSend = true;
-          else if (settings.frequency === "weekly" && diffDays >= 6.9) shouldSend = true;
-          else if (settings.frequency === "monthly" && diffDays >= 27.9) shouldSend = true;
-        }
-
-        if (shouldSend) {
-          try {
-            await sendScheduledReport(user.id, user.email, user.expiryInterval);
-            console.log(`[Cron] Report sent to ${user.email}`);
-          } catch (err: any) {
-            console.error(`[Cron] Report failed for ${user.id}:`, err.message);
+        if (hasEmail) {
+          const [targetH, targetM] = emailTime.split(":");
+          if (targetH === currentHour && targetM === currentMinute) {
+            const lastSent = settings.lastSent ? new Date(settings.lastSent) : null;
+            let shouldSend = !lastSent;
+            if (lastSent) {
+              const diffDays = (now.getTime() - lastSent.getTime()) / (1000 * 60 * 60 * 24);
+              if (emailFreq === "daily"   && diffDays >= 0.9)  shouldSend = true;
+              else if (emailFreq === "weekly"  && diffDays >= 6.9)  shouldSend = true;
+              else if (emailFreq === "monthly" && diffDays >= 27.9) shouldSend = true;
+            }
+            if (shouldSend) {
+              try {
+                await sendScheduledReport(user.id, user.email, user.expiryInterval);
+                console.log(`[Cron] Email report sent to ${user.email} (${emailFreq})`);
+              } catch (err: any) {
+                console.error(`[Cron] Email report failed for ${user.id}:`, err.message);
+              }
+            }
           }
         }
 
-        // ── WhatsApp Schedule (separate from email — waReportFreq/waReportTime) ──
+        // ── WhatsApp Schedule (independent of email) ────────────────────
         const waPhone = user.whatsappPhone || user.waReportPhone || "";
-        const waFreq  = user.waReportFreq  || settings.frequency || "";
-        const waTime  = user.waReportTime  || "";
+        const waFreq  = user.waReportFreq || "";
+        const waTime  = user.waReportTime || "";
 
         if (waPhone && waFreq && waTime) {
           const [waH, waM] = waTime.split(":");
