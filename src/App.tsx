@@ -341,7 +341,9 @@ body: JSON.stringify({
           if (data) {
             setReportSettings({
               frequency: data.frequency || 'none',
-              time: data.time || '09:00'
+              time: data.time || '09:00',
+              waFreq: data.waFreq || 'none',
+              waTime: data.waTime || '09:00',
             });
             if (data.expiryInterval) {
               const parsedVal = parseInt(data.expiryInterval);
@@ -434,7 +436,7 @@ body: JSON.stringify({
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [calendarFilter, setCalendarFilter] = useState<'All' | 'Safe' | 'Expiring Soon' | 'Expired'>('All');
-  const [expiryInterval, setExpiryInterval] = useState<number | null>(null);
+  const [expiryInterval, setExpiryInterval] = useState<number>(30); // Default 30 days, updated from Firestore
   const [filterCategory, setFilterCategory] = useState("All");
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [renewModal, setRenewModal] = useState<{ doc: Document | null, value: string, error: string }>({ doc: null, value: "", error: "" });
@@ -445,7 +447,7 @@ body: JSON.stringify({
 
   // Auto-save settings
   useEffect(() => {
-    if (!user || !isInitialLoadComplete || expiryInterval === null) return;
+    if (!user || !isInitialLoadComplete) return;
     const timer = setTimeout(async () => {
       console.log("Auto-saving settings...", { expiryInterval, ...reportSettings });
       try {
@@ -609,9 +611,20 @@ body: JSON.stringify({
   // Optimized stats and filtering
   const stats = useMemo(() => ({
     total: documents.length,
-    safe: documents.filter(d => d.status === 'Renewed' || getStatus(d.expiryDate) === 'Safe').length,
-    expiring: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expiring Soon').length,
-    expired: documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expired').length,
+    safe: documents.filter(d => {
+      const computed = getStatus(d.expiryDate);
+      // Renewed counts as safe only if not actually expired
+      if (d.status === 'Renewed' && computed !== 'Expired') return true;
+      return computed === 'Safe';
+    }).length,
+    expiring: documents.filter(d => {
+      const computed = getStatus(d.expiryDate);
+      return computed === 'Expiring Soon';
+    }).length,
+    expired: documents.filter(d => {
+      const computed = getStatus(d.expiryDate);
+      return computed === 'Expired';
+    }).length,
   }), [documents, getStatus]);
 
   // ── Component-level plan & limit (used by Header + handleSaveDocument) ──
@@ -1025,6 +1038,7 @@ Track your document expiry dates with AI.
             <SettingsView 
               user={user}
               userData={userData}
+              isAdmin={user?.uid === ADMIN_UID}
               configStatus={configStatus}
               isRefreshingStatus={isRefreshingStatus}
               onRefreshStatus={refreshConfigStatus}
