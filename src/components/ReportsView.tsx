@@ -35,9 +35,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 }) => {
   const stats = {
     total: documents.length,
-    active: documents.filter(d => (d.status === 'Renewed' ? 'Safe' : getDynamicStatus(d.expiryDate, expiryInterval)) === 'Safe').length,
-    soon: documents.filter(d => d.status !== 'Renewed' && getDynamicStatus(d.expiryDate, expiryInterval) === 'Expiring Soon').length,
-    expired: documents.filter(d => d.status !== 'Renewed' && getDynamicStatus(d.expiryDate, expiryInterval) === 'Expired').length,
+    active: documents.filter(d => {
+      const computed = getDynamicStatus(d.expiryDate, expiryInterval);
+      // Renewed counts as safe ONLY if not actually expired
+      if (d.status === 'Renewed' && computed !== 'Expired') return true;
+      return computed === 'Safe';
+    }).length,
+    soon: documents.filter(d => {
+      return getDynamicStatus(d.expiryDate, expiryInterval) === 'Expiring Soon';
+    }).length,
+    expired: documents.filter(d => {
+      return getDynamicStatus(d.expiryDate, expiryInterval) === 'Expired';
+    }).length,
   };
 
   return (
