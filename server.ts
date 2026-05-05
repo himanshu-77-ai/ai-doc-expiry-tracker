@@ -113,7 +113,7 @@ async function sendEmail({ from, to, subject, html, text }: {
 }
 
 // ── Gmail SMTP (invites — no domain needed) ──────────────────────────────────
-// ── Date formatter DD-MM-YYYY (used in all emails) ───────────────────────────
+// ── Date formatter DD-MM-YYYY ────────────────────────────────────────────────
 function fmtDate(dateStr?: string): string {
   if (!dateStr) return "N/A";
   const d = new Date(dateStr);
@@ -121,31 +121,38 @@ function fmtDate(dateStr?: string): string {
   return `${String(d.getDate()).padStart(2,"0")}-${String(d.getMonth()+1).padStart(2,"0")}-${d.getFullYear()}`;
 }
 
+// ── Primary email sender — Resend API (no port blocking, works on all hosts) ─
 async function sendEmailSMTP({ to, subject, html }: { to: string; subject: string; html: string }) {
+  const resend = getResend();
+  if (resend) {
+    // Use Resend API — no SMTP port issues, works on Render free plan
+    // onboarding@resend.dev can send to ANY email on free plan
+    const { error } = await resend.emails.send({
+      from: "AI Tracker <onboarding@resend.dev>",
+      to,
+      subject,
+      html,
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
+  // Fallback: SMTP if Resend not configured
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  if (!user || !pass) throw new Error("SMTP_USER or SMTP_PASS not configured");
+  if (!user || !pass) throw new Error("No email provider configured. Set RESEND_API_KEY or SMTP_USER+SMTP_PASS.");
   const host = process.env.SMTP_HOST || "smtp-relay.brevo.com";
-  const port = parseInt(process.env.SMTP_PORT || "587");
+  const port = parseInt(process.env.SMTP_PORT || "2525");
   const nodemailer = await import("nodemailer");
   const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: false, // TLS on port 587
+    host, port,
+    secure: false,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
   });
-  const fromName = process.env.SMTP_FROM_NAME || "AI Tracker";
-  const fromEmail = process.env.SMTP_FROM_EMAIL || user;
-  await transporter.sendMail({
-    from: `"${fromName}" <${fromEmail}>`,
-    to,
-    subject,
-    html,
-  });
+  await transporter.sendMail({ from: `"AI Tracker" <${user}>`, to, subject, html });
 }
 
 // ── WhatsApp via Twilio ───────────────────────────────────────────────────────
