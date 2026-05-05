@@ -1818,9 +1818,13 @@ https://ai-doc-expiry-tracker.onrender.com`;
   // Check and Send Scheduled Reports
   async function checkScheduledReports() {
     const now = new Date();
-    const currentHour = now.getHours().toString().padStart(2, '0');
-    const currentMinute = now.getMinutes().toString().padStart(2, '0');
-    log(`[Cron] Check at ${currentHour}:${currentMinute} UTC`);
+    // Convert to IST (UTC+5:30) — user sets time in IST
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(now.getTime() + istOffset);
+    const currentHour   = istNow.getUTCHours().toString().padStart(2, "0");
+    const currentMinute = istNow.getUTCMinutes().toString().padStart(2, "0");
+    log(`[Cron] Check at ${currentHour}:${currentMinute} IST (UTC ${now.getHours().toString().padStart(2,"0")}:${now.getMinutes().toString().padStart(2,"0")})`);
+
 
     try {
       let users: any[] = [];
