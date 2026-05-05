@@ -1160,9 +1160,9 @@ _AI Tracker — Smart Document Intelligence_`;
   async function checkAndSendReminders() {
     log(`[Reminders] Starting expiry check at ${new Date().toISOString()}`);
 
-    if (!process.env.RESEND_API_KEY) {
-      console.error("[Reminders] RESEND_API_KEY missing. Reminders aborted.");
-      return { success: false, error: "Resend not configured" };
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+  console.error("[Reminders] SMTP_USER or SMTP_PASS missing. Reminders aborted.");
+  return { success: false, error: "SMTP not configured" };
     }
 
     try {
