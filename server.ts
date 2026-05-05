@@ -121,30 +121,17 @@ function fmtDate(dateStr?: string): string {
   return `${String(d.getDate()).padStart(2,"0")}-${String(d.getMonth()+1).padStart(2,"0")}-${d.getFullYear()}`;
 }
 
-// ── Primary email sender — Resend API (no port blocking, works on all hosts) ─
+// ── Primary email sender — Brevo SMTP port 2525 (works on Render free plan) ──
 async function sendEmailSMTP({ to, subject, html }: { to: string; subject: string; html: string }) {
-  const resend = getResend();
-  if (resend) {
-    // Use Resend API — no SMTP port issues, works on Render free plan
-    // onboarding@resend.dev can send to ANY email on free plan
-    const { error } = await resend.emails.send({
-      from: "AI Tracker <onboarding@resend.dev>",
-      to,
-      subject,
-      html,
-    });
-    if (error) throw new Error(error.message);
-    return;
-  }
-  // Fallback: SMTP if Resend not configured
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  if (!user || !pass) throw new Error("No email provider configured. Set RESEND_API_KEY or SMTP_USER+SMTP_PASS.");
+  if (!user || !pass) throw new Error("SMTP_USER or SMTP_PASS not configured");
   const host = process.env.SMTP_HOST || "smtp-relay.brevo.com";
   const port = parseInt(process.env.SMTP_PORT || "2525");
   const nodemailer = await import("nodemailer");
   const transporter = nodemailer.createTransport({
-    host, port,
+    host,
+    port,
     secure: false,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
@@ -152,7 +139,12 @@ async function sendEmailSMTP({ to, subject, html }: { to: string; subject: strin
     greetingTimeout: 15000,
     socketTimeout: 20000,
   });
-  await transporter.sendMail({ from: `"AI Tracker" <${user}>`, to, subject, html });
+  await transporter.sendMail({
+    from: `"AI Tracker" <${process.env.SMTP_FROM_EMAIL || user}>`,
+    to,
+    subject,
+    html,
+  });
 }
 
 // ── WhatsApp via Twilio ───────────────────────────────────────────────────────
@@ -1255,7 +1247,7 @@ _AI Tracker — Smart Document Intelligence_`;
                   <div style="font-family: sans-serif; padding: 20px; color: #333; border: 1px solid #eee; border-radius: 12px; max-width: 600px;">
                     <h2 style="color: #E11D48; margin-top: 0;">Expiry Alert</h2>
                     <p>Hello,</p>
-                    <p>Your document <strong>${doc.title}</strong> is set to expire on <strong>${doc.expiryDate}</strong> (${days} days from now).</p>
+                    <p>Your document <strong>${doc.title}</strong> is set to expire on <strong>${fmtDate(doc.expiryDate)}</strong> (${days} days from now).</p>
                     <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; margin: 24px 0; border: 1px solid #F3F4F6;">
                       <p style="margin: 0; font-weight: bold; color: #111827;">Document Details:</p>
                       <p style="margin: 8px 0 0 0; color: #4B5563;">Type: ${doc.category}</p>
@@ -1278,7 +1270,7 @@ _AI Tracker — Smart Document Intelligence_`;
 
 *${doc.title}* expires in *${days} day${days > 1 ? "s" : ""}*!
 
-📅 Expiry: ${doc.expiryDate}
+📅 Expiry: ${fmtDate(doc.expiryDate)}
 📂 Type: ${doc.category}
 
 👉 Renew now:
@@ -1405,7 +1397,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
           <tr>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.expiryDate}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmtDate(doc.expiryDate)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">${text}</td>
           </tr>
         `;
@@ -1704,7 +1696,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
           <tr>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.expiryDate}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmtDate(doc.expiryDate)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">
               ${text}
             </td>
