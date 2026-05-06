@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { loadStripe } from "@stripe/stripe-js";
 import { User } from "../types";
 import { cn } from "../lib/utils";
+import { auth } from "../lib/firebase";
 
 interface SubscriptionViewProps {
   user: User | null;
@@ -135,8 +136,25 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
           userId: user?.uid,
           plan: plan.name
         },
-        handler: function (response: any) {
+        handler: async function (response: any) {
           alert("Payment Successful! Payment ID: " + response.razorpay_payment_id);
+          // Direct upgrade fallback (webhook is primary, this is safety net)
+          try {
+            const token = await auth.currentUser?.getIdToken();
+            await fetch("/api/payments/razorpay-direct", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                paymentId: response.razorpay_payment_id,
+                plan: plan.name
+              })
+            });
+          } catch (e) {
+            console.error("Direct plan upgrade failed (webhook should handle it):", e);
+          }
         },
         prefill: {
           name: user?.displayName || "User",
@@ -293,8 +311,25 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
               </div>
 
               <button 
-                onClick={() => {
-                  alert("Thank you! Verification will take up to 24 hours.");
+                onClick={async () => {
+                  try {
+                    const token = await auth.currentUser?.getIdToken();
+                    await fetch("/api/payments/upi-pending", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`
+                      },
+                      body: JSON.stringify({
+                        amount: editableAmount,
+                        plan: selectedPlan?.name?.name || "monthly",
+                      })
+                    });
+                    alert("Payment submitted! Admin will verify and upgrade your plan within 24 hours.");
+                  } catch (err: any) {
+                    alert("Submission failed. Please try again or contact support.");
+                    console.error("UPI submission error:", err);
+                  }
                   setShowUpiModal(false);
                 }}
                 className="w-full py-4 bg-gray-900 text-white rounded-xl font-bold"
