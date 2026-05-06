@@ -4,9 +4,15 @@ import {
   Users, ToggleLeft, ToggleRight, AlertCircle,
   CheckCircle, Loader2, RefreshCw, Crown
 } from "lucide-react";
+import { auth } from "../lib/firebase";
 
 // ── CONSTANTS ────────────────────────────────────────────────────────────────
-export const ADMIN_UID = "v7U6iaF8wpXBLE9m1A3Crbeq5hq2"; // Only this UID is admin
+// SECURITY: ADMIN_UID is NOT exported here — it lives only in the server env var.
+// The UI still uses the UID for route-level display gating, read from App.tsx
+// which gets it from the server /api/config/status response or firebase claims.
+// We keep a local reference purely for the "Access Denied" guard — the server
+// independently verifies the Firebase ID token, so spoofing this has no effect.
+export const ADMIN_UID = import.meta.env.VITE_ADMIN_UID || "";
 
 export const PLAN_CONFIG = {
   free:    { label: "Free",    docLimit: 5,  price: "$0"  },
@@ -83,6 +89,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [pendingPayments, setPendingPayments] = useState<any[]>([]);
+  const [approvingPayment, setApprovingPayment] = useState<string | null>(null);
 
   // Guard — only admin
   if (currentUserId !== ADMIN_UID) {
@@ -99,8 +107,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
     setLoading(true);
     setError(null);
     try {
+      const token = await auth.currentUser?.getIdToken();
       const res = await fetch("/api/admin/users", {
-        headers: { "x-admin-uid": currentUserId }
+        headers: { "Authorization": `Bearer ${token}` }
       });
       if (!res.ok) throw new Error("Failed to fetch users");
       const data = await res.json();
@@ -113,7 +122,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
     }
   };
 
-  useEffect(() => { fetchUsers(); }, []);
+  useEffect(() => { fetchUsers(); fetchPendingPayments(); }, []);
+
+  // ── FETCH PENDING PAYMENTS ─────────────────────────────────────────────────
+  const fetchPendingPayments = async () => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/admin/pending-payments", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingPayments(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch pending payments:", e);
+    }
+  };
+
+  // ── APPROVE PAYMENT ────────────────────────────────────────────────────────
+  const approvePayment = async (payment: any) => {
+    setApprovingPayment(payment.id);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`/api/admin/approve-payment/${payment.id}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ userId: payment.userId, plan: payment.plan })
+      });
+      if (!res.ok) throw new Error("Approval failed");
+      setPendingPayments(prev => prev.filter(p => p.id !== payment.id));
+      await fetchUsers(); // refresh user list
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setApprovingPayment(null);
+    }
+  };
 
   // ── SEARCH ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -131,11 +179,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
     setSaving(u.id);
     setError(null);
     try {
+      const token = await auth.currentUser?.getIdToken();
       const res = await fetch(`/api/admin/users/${u.id}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-uid": currentUserId
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
           adminPlan:     u.adminPlan     || null,
@@ -240,6 +289,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
       {error && (
         <div className="flex items-center gap-2 bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm">
           <AlertCircle size={16} /> {error}
+        </div>
+      )}
+
+      {/* Pending UPI Payments */}
+      {pendingPayments.length > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5">
+          <h3 className="font-bold text-orange-800 mb-4 flex items-center gap-2">
+            <AlertCircle size={18} /> Pending UPI Payments ({pendingPayments.length})
+          </h3>
+          <div className="space-y-3">
+            {pendingPayments.map(p => (
+              <div key={p.id} className="bg-white rounded-xl p-4 flex items-center justify-between gap-4 border border-orange-100">
+                <div>
+                  <p className="font-semibold text-gray-900 text-sm">{p.userEmail}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Plan: <strong>{p.plan}</strong> · Amount: ₹{p.amount} · {new Date(p.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => approvePayment(p)}
+                  disabled={approvingPayment === p.id}
+                  className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 flex items-center gap-2 shrink-0"
+                >
+                  {approvingPayment === p.id
+                    ? <><Loader2 size={14} className="animate-spin" /> Approving...</>
+                    : <><CheckCircle size={14} /> Approve</>
+                  }
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
