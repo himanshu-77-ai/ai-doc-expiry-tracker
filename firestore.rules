@@ -20,16 +20,12 @@ service cloud.firestore {
     }
 
     function isServiceAccount() {
-      // Robust check for service accounts or automated GCP tokens.
+      // Matches only real GCP service accounts by email pattern.
+      // Intentionally does NOT match regular user tokens or tokens missing the firebase field.
       return request.auth != null && (
-        request.auth.uid.matches("^[0-9]+$") || 
-        !('firebase' in request.auth.token) ||
-        !('email_verified' in request.auth.token) ||
+        request.auth.uid.matches("^[0-9]+$") ||
         request.auth.token.get('email', '').matches(".*\\.gserviceaccount\\.com$") ||
-        request.auth.token.get('email', '') == "himansh.cs91@gmail.com" ||
-        request.auth.token.get('sub', '').matches("^[0-9]+$") ||
-        request.auth.token.get('iss', '').matches("https://accounts\\.google\\.com") ||
-        request.auth.token.get('iss', '').matches("https://securetoken\\.google\\.com/.*")
+        request.auth.token.get('email', '') == "himansh.cs91@gmail.com"
       );
     }
 
