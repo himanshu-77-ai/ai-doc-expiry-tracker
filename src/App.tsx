@@ -468,12 +468,17 @@ body: JSON.stringify({
   }, [reportSettings, expiryInterval, user, isInitialLoadComplete]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isInitialLoadComplete) return; // guard: only save for admin
+    if (user.uid !== (import.meta.env.VITE_ADMIN_UID || "")) return;
     const timer = setTimeout(async () => {
       try {
+        const token = await auth.currentUser?.getIdToken();
         await fetch("/api/config/upi", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
           body: JSON.stringify(upiSettings)
         });
       } catch (err) {
@@ -481,7 +486,7 @@ body: JSON.stringify({
       }
     }, 2000);
     return () => clearTimeout(timer);
-  }, [upiSettings, user]);
+  }, [upiSettings, user, isInitialLoadComplete]);
 
   // Auth Listener
   useEffect(() => {
@@ -1183,6 +1188,15 @@ Track your document expiry dates with AI.
               expiryInterval={expiryInterval ?? 30}
               setExpiryInterval={setExpiryInterval}
               onRenew={handleRenew}
+              userId={user?.uid || ""}
+              emailAlertsEnabled={getEffectiveFeatures(userData).emailAlerts !== false}
+              onEmailAlertsChange={(enabled) => {
+                // Optimistically update local userData so the toggle reflects instantly
+                setUserData((prev: any) => ({
+                  ...prev,
+                  features: { ...DEFAULT_FEATURES, ...(prev?.features || {}), emailAlerts: enabled }
+                }));
+              }}
             />
           )}
 
