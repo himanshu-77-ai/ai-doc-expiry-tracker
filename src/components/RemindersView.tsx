@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { Bell, ShieldCheck } from "lucide-react";
 import { format } from "date-fns";
 import { Document } from "../types";
 import { cn } from "../lib/utils";
+import { auth } from "../lib/firebase";
 
 interface RemindersViewProps {
   documents: Document[];
@@ -12,6 +13,9 @@ interface RemindersViewProps {
   isTriggeringReminders: boolean;
   onTriggerReminders: () => void;
   onRenew: (doc: Document) => void;
+  userId: string;
+  emailAlertsEnabled: boolean;
+  onEmailAlertsChange: (enabled: boolean) => void;
 }
 
 export function RemindersView({ 
@@ -21,10 +25,35 @@ export function RemindersView({
   getStatus,
   isTriggeringReminders,
   onTriggerReminders,
-  onRenew
+  onRenew,
+  userId,
+  emailAlertsEnabled,
+  onEmailAlertsChange,
 }: RemindersViewProps) {
+  const [isSavingToggle, setIsSavingToggle] = useState(false);
   const reminderDocs = documents.filter(d => getStatus(d.expiryDate) !== 'Safe' && d.status !== 'Renewed');
   const renewedDocs = documents.filter(d => d.status === 'Renewed');
+
+  const handleEmailToggle = async (enabled: boolean) => {
+    setIsSavingToggle(true);
+    onEmailAlertsChange(enabled); // optimistic update
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      await fetch("/api/user/report-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ userId, emailAlerts: enabled })
+      });
+    } catch (err) {
+      console.error("Failed to save email alerts setting:", err);
+      onEmailAlertsChange(!enabled); // revert on failure
+    } finally {
+      setIsSavingToggle(false);
+    }
+  };
 
   const getStatusUI = (status: string) => {
     switch (status) {
@@ -53,9 +82,16 @@ export function RemindersView({
             <div className="space-y-1">
               <p className="font-bold text-gray-900">Email Reminders</p>
               <p className="text-sm text-gray-500">Receive auto-emails before document expiry</p>
+              {isSavingToggle && <p className="text-xs text-blue-400">Saving...</p>}
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" defaultChecked className="sr-only peer" />
+              <input
+                type="checkbox"
+                checked={emailAlertsEnabled}
+                onChange={(e) => handleEmailToggle(e.target.checked)}
+                disabled={isSavingToggle}
+                className="sr-only peer"
+              />
               <div className="w-14 h-8 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
           </div>
