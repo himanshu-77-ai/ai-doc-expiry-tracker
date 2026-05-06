@@ -4,7 +4,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import Razorpay from "razorpay";
 import dotenv from "dotenv";
-import { Resend } from "resend";
 import cron from "node-cron";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
@@ -76,40 +75,6 @@ function getStatusInfo(expiryDate: string, interval: number = 30) {
   if (diff < 0) return { text: "Expired", color: "#EF4444" };
   if (diff <= interval) return { text: "Expiring Soon", color: "#F59E0B" };
   return { text: "Safe", color: "#10B981" };
-}
-
-// ── EMAIL via Resend ─────────────────────────────────────────────────────────
-function getResend() {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) {
-    console.error("[Email] RESEND_API_KEY missing");
-    return null;
-  }
-  return new Resend(key);
-}
-
-// Unified send function — drop-in replacement for transporter.sendMail()
-async function sendEmail({ from, to, subject, html, text }: {
-  from?: string;
-  to: string;
-  subject: string;
-  html?: string;
-  text?: string;
-}) {
-  const resend = getResend();
-  if (!resend) throw new Error("RESEND_API_KEY not configured");
-
-  const fromAddr = from || `AI Tracker <${process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev"}>`;
-
-  const { data, error } = await resend.emails.send({
-    from: fromAddr,
-    to,
-    subject,
-    html: html || text || "",
-  });
-
-  if (error) throw new Error(error.message);
-  return data;
 }
 
 // ── Gmail SMTP (invites — no domain needed) ──────────────────────────────────
@@ -803,6 +768,19 @@ async function startServer() {
   });
 
   app.post("/api/config/upi", async (req, res) => {
+    // Only admin can update UPI settings
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      const adminUid = process.env.ADMIN_UID;
+      if (!adminUid || decoded.uid !== adminUid) {
+        return res.status(403).json({ error: "Admin only" });
+      }
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
     const { upiId, upiName } = req.body;
     try {
       if (db) {
@@ -826,9 +804,35 @@ async function startServer() {
     }
   });
 
+  // Simple in-memory rate limiter (no extra package needed)
+  const emailRateMap = new Map<string, { count: number; resetAt: number }>();
+  function emailRateLimit(req: any, res: any): boolean {
+    const ip = req.ip || req.connection.remoteAddress || "unknown";
+    const now = Date.now();
+    const window = 10 * 60 * 1000; // 10 minutes
+    const max = 5;
+    const entry = emailRateMap.get(ip);
+    if (!entry || now > entry.resetAt) {
+      emailRateMap.set(ip, { count: 1, resetAt: now + window });
+      return true;
+    }
+    if (entry.count >= max) {
+      res.status(429).json({ error: "Too many requests. Try again in 10 minutes." });
+      return false;
+    }
+    entry.count++;
+    return true;
+  }
+
   // Email Notification Route
   app.post("/api/notifications/send-email", async (req, res) => {
+    if (!emailRateLimit(req, res)) return;
     const { to, subject, text, html } = req.body;
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!to || !emailRegex.test(to)) {
+      return res.status(400).json({ error: "Invalid or missing email address" });
+    }
     try {
       await sendEmailSMTP({ to, subject, html: html || text });
       res.json({ success: true });
@@ -840,6 +844,7 @@ async function startServer() {
 
   // Invite Route — Email via SMTP + WhatsApp via Twilio
   app.post("/api/invites/send", async (req, res) => {
+    if (!emailRateLimit(req, res)) return;
     const { email, phone, inviteLink, method = "email" } = req.body;
     if (!inviteLink) return res.status(400).json({ error: "Missing inviteLink" });
 
@@ -1221,24 +1226,6 @@ _AI Tracker — Smart Document Intelligence_`;
           for (const doc of eligibleDocs) {
             log(`[Reminders] Sending ${days}-day alert to ${user.email} for ${doc.title}`);
             try {
-              // WhatsApp reminder (always works via Twilio)
-              if (user.whatsappPhone) {
-                try {
-                  const emoji = days <= 1 ? "URGENT" : days <= 7 ? "WARNING" : "REMINDER";
-                  const waMsg = [
-                    "AI Tracker - " + emoji,
-                    "",
-                    doc.title + " expires in " + days + " day" + (days > 1 ? "s" : "") + "!",
-                    "Expiry: " + doc.expiryDate,
-                    "Type: " + doc.category,
-                    "",
-                    "Open app: https://ai-doc-expiry-tracker.onrender.com"
-                  ].join("\n");
-                  await sendWhatsApp(user.whatsappPhone, waMsg);
-                } catch (waErr: any) {
-                  console.error("[Reminders] WhatsApp failed:", waErr.message);
-                }
-              }
               // FIXED: SMTP — sends to ALL users, no domain needed
               await sendEmailSMTP({
                 to: user.email,
@@ -1940,8 +1927,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
     }
   }
 
-  // Schedule Daily Check (at 9:00 AM)
-  cron.schedule("0 9 * * *", () => {
+  // Schedule Daily Check (at 9:00 AM IST = 3:30 AM UTC)
+  cron.schedule("30 3 * * *", () => {
     checkAndSendReminders();
   });
 
@@ -1986,10 +1973,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
       gemini: !!process.env.GEMINI_API_KEY
     };
 
-    // 1. Test Resend API
+    // 1. Test SMTP config
     try {
-      if (!process.env.RESEND_API_KEY) throw new Error("RESEND_API_KEY missing");
-      results.smtp = "Resend: Configured ✅";
+      if (!process.env.SMTP_USER || !process.env.SMTP_PASS) throw new Error("SMTP_USER or SMTP_PASS missing");
+      results.smtp = "SMTP: Configured ✅";
     } catch (e: any) {
       results.smtp = `Failed: ${e.message}`;
     }
@@ -2015,6 +2002,49 @@ https://ai-doc-expiry-tracker.onrender.com`;
     }
 
     res.json(results);
+  });
+
+  // UPI Pending Payment — save for admin approval
+  app.post("/api/payments/upi-pending", async (req, res) => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      if (!db) return res.status(503).json({ error: "DB not ready" });
+      await db.collection("pendingPayments").add({
+        userId: decoded.uid,
+        userEmail: decoded.email || "",
+        amount: req.body.amount,
+        plan: req.body.plan || "monthly",
+        paymentMethod: "upi",
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      });
+      console.log(`[UPI] Pending payment recorded for user ${decoded.uid}`);
+      res.json({ success: true, message: "Payment submitted for admin verification" });
+    } catch (err: any) {
+      console.error("[UPI Pending]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Razorpay direct upgrade fallback (in case webhook is delayed)
+  app.post("/api/payments/razorpay-direct", async (req, res) => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      const { paymentId, plan } = req.body;
+      if (!paymentId || !plan) return res.status(400).json({ error: "Missing paymentId or plan" });
+      await updateUserPlan(decoded.uid, plan);
+      console.log(`[Razorpay Direct] Upgraded user ${decoded.uid} to ${plan} via paymentId ${paymentId}`);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Razorpay Direct]", err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Razorpay Webhook
@@ -2086,24 +2116,42 @@ https://ai-doc-expiry-tracker.onrender.com`;
     res.json({ received: true });
   });
 
-  // Vite middleware for development
   // ═══════════════════════════════════════════════════════════════
   // ADMIN ROUTES — Only accessible by ADMIN_UID
   // ═══════════════════════════════════════════════════════════════
-  const ADMIN_UID = "v7U6iaF8wpXBLE9m1A3Crbeq5hq2";
+  const ADMIN_UID = process.env.ADMIN_UID;
+  if (!ADMIN_UID) {
+    console.error("[Admin] ADMIN_UID env var not set — admin routes will be disabled.");
+  }
 
-  const verifyAdmin = (req: any, res: any): boolean => {
-    const uid = req.headers["x-admin-uid"];
-    if (uid !== ADMIN_UID) {
-      res.status(403).json({ error: "Unauthorized" });
+  // Secure server-side admin check using Firebase ID token
+  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
+    if (!ADMIN_UID) {
+      res.status(503).json({ error: "Admin not configured" });
       return false;
     }
-    return true;
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) {
+      res.status(401).json({ error: "Missing authorization token" });
+      return false;
+    }
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      if (decoded.uid !== ADMIN_UID) {
+        res.status(403).json({ error: "Unauthorized: not admin" });
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return false;
+    }
   };
 
   // GET all users
   app.get("/api/admin/users", async (req, res) => {
-    if (!verifyAdmin(req, res)) return;
+    if (!await verifyAdmin(req, res)) return;
     try {
       if (!db) throw new Error("DB not ready");
       const usersSnap = await db.collection("users").get();
@@ -2132,7 +2180,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // POST update user — plan, docLimit, features, note
   app.post("/api/admin/users/:userId", async (req, res) => {
-    if (!verifyAdmin(req, res)) return;
+    if (!await verifyAdmin(req, res)) return;
     const { userId } = req.params;
     const { adminPlan, adminDocLimit, adminExpiry, adminNote, features } = req.body;
     try {
@@ -2150,6 +2198,40 @@ https://ai-doc-expiry-tracker.onrender.com`;
       res.json({ success: true });
     } catch (err: any) {
       console.error("[Admin] Update user failed:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET pending UPI payments
+  app.get("/api/admin/pending-payments", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
+    try {
+      if (!db) throw new Error("DB not ready");
+      const snap = await db.collection("pendingPayments").where("status", "==", "pending").get();
+      const payments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      res.json(payments);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST approve UPI payment
+  app.post("/api/admin/approve-payment/:paymentId", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
+    const { paymentId } = req.params;
+    const { userId, plan } = req.body;
+    if (!userId || !plan) return res.status(400).json({ error: "Missing userId or plan" });
+    try {
+      if (!db) throw new Error("DB not ready");
+      await updateUserPlan(userId, plan);
+      await db.collection("pendingPayments").doc(paymentId).set(
+        { status: "approved", approvedAt: new Date().toISOString() },
+        { merge: true }
+      );
+      console.log(`[Admin] UPI payment ${paymentId} approved: user ${userId} → ${plan}`);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Admin] Approve payment failed:", err.message);
       res.status(500).json({ error: err.message });
     }
   });
