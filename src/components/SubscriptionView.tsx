@@ -393,3 +393,6 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
           </div>
         )}
       </AnimatePresence>
+    </div>
+  );
+};
