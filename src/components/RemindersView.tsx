@@ -131,7 +131,7 @@ export function RemindersView({
                 </div>
                 <div className="flex-1">
                   <p className="font-bold text-gray-900 text-lg">{doc.title} is {ui.label.toLowerCase()}</p>
-                  <p className="text-sm text-gray-500 font-medium">Expires on {format(new Date(doc.expiryDate), 'MMMM dd, yyyy')}</p>
+                  <p className="text-sm text-gray-500 font-medium">Expires on {format(parseISO(doc.expiryDate), 'dd/MM/yyyy')}</p>
                 </div>
                 <button 
                   onClick={() => onRenew(doc)}
@@ -151,7 +151,7 @@ export function RemindersView({
                 <p className="font-bold text-gray-900 text-lg">{doc.title}</p>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black text-green-600 uppercase tracking-tight">Status: Renewed</span>
-                  <p className="text-sm text-gray-500 font-medium">• Expires on {format(new Date(doc.expiryDate), 'MMMM dd, yyyy')}</p>
+                  <p className="text-sm text-gray-500 font-medium">• Expires on {format(parseISO(doc.expiryDate), 'dd/MM/yyyy')}</p>
                 </div>
               </div>
               <div className="w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
