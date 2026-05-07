@@ -773,7 +773,7 @@ async function startServer() {
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const decoded = await admin.auth().verifyIdToken(token);
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
       const adminUid = process.env.ADMIN_UID;
       if (!adminUid || decoded.uid !== adminUid) {
         return res.status(403).json({ error: "Admin only" });
@@ -2032,7 +2032,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const decoded = await admin.auth().verifyIdToken(token);
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
       const adminUid = process.env.ADMIN_UID;
       if (!adminUid || decoded.uid !== adminUid) {
         return res.status(403).json({ error: "Admin only" });
@@ -2060,7 +2060,9 @@ https://ai-doc-expiry-tracker.onrender.com`;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const decoded = await admin.auth().verifyIdToken(token);
+      const activeApp = admin.apps[0];
+      if (!activeApp) return res.status(503).json({ error: "Firebase not initialized" });
+      const decoded = await admin.auth(activeApp).verifyIdToken(token);
       if (!db) return res.status(503).json({ error: "DB not ready" });
 
       const userEmail = decoded.email || req.body.userEmail || "";
@@ -2120,7 +2122,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const decoded = await admin.auth().verifyIdToken(token);
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
       const { paymentId, plan } = req.body;
       if (!paymentId || !plan) return res.status(400).json({ error: "Missing paymentId or plan" });
       await updateUserPlan(decoded.uid, plan);
@@ -2232,7 +2234,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       return false;
     }
     try {
-      const decoded = await admin.auth().verifyIdToken(token);
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
       if (decoded.uid !== ADMIN_UID) {
         res.status(403).json({ error: "Unauthorized: not admin" });
         return false;
