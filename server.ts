@@ -1940,6 +1940,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Helper to update user plan
   async function updateUserPlan(userId: string, plan: string) {
+    // Normalize plan to lowercase to match PLAN_CONFIG keys: "free" | "monthly" | "yearly"
+    plan = plan.toLowerCase().trim();
     console.log(`[Billing] Updating user ${userId} to plan: ${plan}`);
     try {
       if (db) {
@@ -2060,16 +2062,51 @@ https://ai-doc-expiry-tracker.onrender.com`;
     try {
       const decoded = await admin.auth().verifyIdToken(token);
       if (!db) return res.status(503).json({ error: "DB not ready" });
+
+      const userEmail = decoded.email || req.body.userEmail || "";
+      const amount    = req.body.amount;
+      const plan      = (req.body.plan || "monthly").toLowerCase().trim();
+
       await db.collection("pendingPayments").add({
         userId: decoded.uid,
-        userEmail: decoded.email || "",
-        amount: req.body.amount,
-        plan: req.body.plan || "monthly",
+        userEmail,
+        amount,
+        plan,
         paymentMethod: "upi",
         status: "pending",
         createdAt: new Date().toISOString(),
       });
       console.log(`[UPI] Pending payment recorded for user ${decoded.uid}`);
+
+      // ── Notify admin by email so they don't miss a pending payment ──────────
+      const adminEmail = process.env.SMTP_USER; // admin's own Gmail
+      if (adminEmail) {
+        try {
+          await sendEmailSMTP({
+            to: adminEmail,
+            subject: `[AI Tracker] New UPI Payment Pending — ₹${amount} (${plan})`,
+            html: `
+              <div style="font-family:sans-serif;max-width:500px">
+                <h2 style="color:#ea580c">💰 New UPI Payment Pending</h2>
+                <table style="width:100%;border-collapse:collapse">
+                  <tr><td style="padding:8px;color:#666">User Email</td><td style="padding:8px;font-weight:bold">${userEmail}</td></tr>
+                  <tr style="background:#f9f9f9"><td style="padding:8px;color:#666">Plan</td><td style="padding:8px;font-weight:bold;text-transform:capitalize">${plan}</td></tr>
+                  <tr><td style="padding:8px;color:#666">Amount</td><td style="padding:8px;font-weight:bold">₹${amount}</td></tr>
+                  <tr style="background:#f9f9f9"><td style="padding:8px;color:#666">User ID</td><td style="padding:8px;font-family:monospace;font-size:12px">${decoded.uid}</td></tr>
+                  <tr><td style="padding:8px;color:#666">Time</td><td style="padding:8px">${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</td></tr>
+                </table>
+                <br/>
+                <p style="color:#666">Open your Admin Panel → Pending Payments → click <strong>Approve</strong> to activate the user's plan.</p>
+              </div>
+            `,
+          });
+          console.log(`[UPI] Admin notification sent to ${adminEmail}`);
+        } catch (mailErr: any) {
+          // Don't fail the request if email fails — payment is already recorded
+          console.error("[UPI] Admin email failed (non-critical):", mailErr.message);
+        }
+      }
+
       res.json({ success: true, message: "Payment submitted for admin verification" });
     } catch (err: any) {
       console.error("[UPI Pending]", err.message);
@@ -2095,8 +2132,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
     }
   });
 
-  // Razorpay Webhook
-  app.post("/api/webhooks/razorpay", express.json(), async (req, res) => {
+  // Razorpay Webhook — must use raw body for HMAC signature check
+  app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), async (req, res) => {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
     const signature = req.headers["x-razorpay-signature"] as string;
 
@@ -2104,10 +2141,11 @@ https://ai-doc-expiry-tracker.onrender.com`;
       return res.status(400).send("Missing secret or signature");
     }
 
-    const body = JSON.stringify(req.body);
+    // Use raw Buffer — JSON.stringify(req.body) would re-serialize and may break HMAC
+    const rawBody = req.body as Buffer;
     const expectedSignature = crypto
       .createHmac("sha256", secret)
-      .update(body)
+      .update(rawBody)
       .digest("hex");
 
     if (signature !== expectedSignature) {
@@ -2115,16 +2153,25 @@ https://ai-doc-expiry-tracker.onrender.com`;
       return res.status(400).send("Invalid signature");
     }
 
-    const event = req.body.event;
+    let parsedBody: any;
+    try {
+      parsedBody = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      return res.status(400).send("Invalid JSON body");
+    }
+
+    const event = parsedBody.event;
     console.log(`[Razorpay Webhook] Received event: ${event}`);
 
     if (event === "payment.captured") {
-      const payment = req.body.payload.payment.entity;
-      const userId = payment.notes?.userId;
-      const plan = payment.notes?.plan || "Monthly";
-      
+      const payment = parsedBody.payload?.payment?.entity;
+      const userId = payment?.notes?.userId;
+      const plan = payment?.notes?.plan || "monthly";
+
       if (userId) {
         await updateUserPlan(userId, plan);
+      } else {
+        console.warn("[Razorpay Webhook] payment.captured missing userId in notes");
       }
     }
 
