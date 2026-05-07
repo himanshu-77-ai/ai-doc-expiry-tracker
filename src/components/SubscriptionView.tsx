@@ -19,18 +19,22 @@ interface SubscriptionViewProps {
   user: User | null;
   upiSettings: { upiId: string, upiName: string };
   razorpayKeyId?: string;
+  onPlanUpgraded?: () => void; // callback so App.tsx can re-fetch userData
 }
 
 export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
   user,
   upiSettings,
-  razorpayKeyId
+  razorpayKeyId,
+  onPlanUpgraded,
 }) => {
   const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'stripe' | 'upi'>('razorpay');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUpiModal, setShowUpiModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [editableAmount, setEditableAmount] = useState<string>("");
+  const [upiSubmitting, setUpiSubmitting] = useState(false);
+  const [upiSuccess, setUpiSuccess] = useState(false);
 
   const plans = [
     { 
@@ -86,6 +90,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
       if (paymentMethod === 'upi') {
         setSelectedPlan({ name: plan, amount: inrAmount, usdAmount });
         setEditableAmount(inrAmount.toString());
+        setUpiSuccess(false);
         setShowUpiModal(true);
         setIsProcessing(false);
         return;
@@ -133,8 +138,9 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
         description: `${plan.name} Subscription`,
         order_id: order.id,
         notes: {
+          // Store lowercase plan so webhook writes correct key to Firestore
           userId: user?.uid,
-          plan: plan.name
+          plan: plan.name.toLowerCase(),
         },
         handler: async function (response: any) {
           alert("Payment Successful! Payment ID: " + response.razorpay_payment_id);
@@ -149,9 +155,12 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
               },
               body: JSON.stringify({
                 paymentId: response.razorpay_payment_id,
-                plan: plan.name
+                // lowercase to match PLAN_CONFIG keys
+                plan: plan.name.toLowerCase(),
               })
             });
+            // Notify App.tsx to re-fetch userData so plan shows immediately
+            onPlanUpgraded?.();
           } catch (e) {
             console.error("Direct plan upgrade failed (webhook should handle it):", e);
           }
@@ -170,12 +179,10 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
         }
       };
       
-      // @ts-ignore
       if (!(window as any).Razorpay) {
         throw new Error("Razorpay SDK not loaded. Please confirm your internet connection.");
       }
       
-      // @ts-ignore
       const rzp = new (window as any).Razorpay(options);
       rzp.open();
     } catch (err: any) {
@@ -183,6 +190,43 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
       alert(`Payment failed: ${err.message || "Please check configuration."}`);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleUpiPaid = async () => {
+    if (!selectedPlan) return;
+    setUpiSubmitting(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Not authenticated. Please sign in again.");
+
+      const planName = selectedPlan?.name?.name?.toLowerCase() || "monthly";
+
+      const res = await fetch("/api/payments/upi-pending", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: user?.uid || "",
+          userEmail: user?.email || "",
+          amount: Number(editableAmount),
+          plan: planName,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error: ${res.status}`);
+      }
+
+      setUpiSuccess(true);
+    } catch (err: any) {
+      console.error("UPI submission error:", err);
+      alert(`Submission failed: ${err.message || "Please try again or contact support."}`);
+    } finally {
+      setUpiSubmitting(false);
     }
   };
 
@@ -282,64 +326,70 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
             >
               <div className="flex justify-between items-center">
                 <h3 className="text-xl font-bold">UPI Payment</h3>
-                <button onClick={() => setShowUpiModal(false)} className="text-gray-400 hover:text-gray-600">
+                <button 
+                  onClick={() => { setShowUpiModal(false); setUpiSuccess(false); }} 
+                  className="text-gray-400 hover:text-gray-600"
+                >
                   <X size={24} />
                 </button>
               </div>
-              
-              <div className="bg-gray-50 p-6 rounded-2xl flex flex-col items-center gap-4">
-                <QRCodeSVG 
-                  value={`upi://pay?pa=${upiSettings.upiId}&pn=${upiSettings.upiName}&am=${editableAmount}&cu=INR`}
-                  size={200}
-                />
-                <div className="space-y-1">
-                  <p className="font-bold text-lg">{upiSettings.upiName}</p>
-                  <p className="text-gray-500 font-mono text-sm">{upiSettings.upiId}</p>
-                </div>
-              </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500 text-sm">Amount (₹):</span>
-                  <input 
-                    type="number"
-                    value={editableAmount}
-                    onChange={(e) => setEditableAmount(e.target.value)}
-                    className="w-32 px-3 py-1 border border-blue-200 rounded-lg text-right font-bold text-blue-600 outline-none"
-                  />
+              {upiSuccess ? (
+                <div className="py-8 space-y-4">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+                    <Check size={32} className="text-green-600" />
+                  </div>
+                  <h4 className="text-xl font-bold text-green-700">Payment Submitted!</h4>
+                  <p className="text-gray-500 text-sm">
+                    Your payment has been recorded. Admin will verify and upgrade your plan within 24 hours. 
+                    You'll see your new plan after your next login.
+                  </p>
+                  <button
+                    onClick={() => { setShowUpiModal(false); setUpiSuccess(false); }}
+                    className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold"
+                  >
+                    Close
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="bg-gray-50 p-6 rounded-2xl flex flex-col items-center gap-4">
+                    <QRCodeSVG 
+                      value={`upi://pay?pa=${upiSettings.upiId}&pn=${upiSettings.upiName}&am=${editableAmount}&cu=INR`}
+                      size={200}
+                    />
+                    <div className="space-y-1">
+                      <p className="font-bold text-lg">{upiSettings.upiName}</p>
+                      <p className="text-gray-500 font-mono text-sm">{upiSettings.upiId}</p>
+                    </div>
+                  </div>
 
-              <button 
-                onClick={async () => {
-                  try {
-                    const token = await auth.currentUser?.getIdToken();
-                    await fetch("/api/payments/upi-pending", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${token}`
-                      },
-                      body: JSON.stringify({
-                        amount: editableAmount,
-                        plan: selectedPlan?.name?.name || "monthly",
-                      })
-                    });
-                    alert("Payment submitted! Admin will verify and upgrade your plan within 24 hours.");
-                  } catch (err: any) {
-                    alert("Submission failed. Please try again or contact support.");
-                    console.error("UPI submission error:", err);
-                  }
-                  setShowUpiModal(false);
-                }}
-                className="w-full py-4 bg-gray-900 text-white rounded-xl font-bold"
-              >
-                I have Paid
-              </button>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-gray-500 text-sm">Amount (₹):</span>
+                      <input 
+                        type="number"
+                        value={editableAmount}
+                        onChange={(e) => setEditableAmount(e.target.value)}
+                        className="w-32 px-3 py-1 border border-blue-200 rounded-lg text-right font-bold text-blue-600 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleUpiPaid}
+                    disabled={upiSubmitting}
+                    className="w-full py-4 bg-gray-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {upiSubmitting ? (
+                      <><Loader2 size={18} className="animate-spin" /> Submitting...</>
+                    ) : (
+                      "I have Paid"
+                    )}
+                  </button>
+                </>
+              )}
             </motion.div>
           </div>
         )}
       </AnimatePresence>
-    </div>
-  );
-};
