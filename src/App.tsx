@@ -490,9 +490,14 @@ body: JSON.stringify({
 
   // Auth Listener
   useEffect(() => {
+    let userDocUnsub: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setIsAuthReady(true);
+
+      // Clean up previous user's doc listener on user change
+      if (userDocUnsub) { userDocUnsub(); userDocUnsub = null; }
 
       if (user) {
         // Sync user profile to Firestore for server-side reminders
@@ -505,9 +510,11 @@ body: JSON.stringify({
             lastLogin: new Date().toISOString()
           }, { merge: true });
 
-          // Fetch full user data (plan, features, overrides)
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) setUserData(userSnap.data());
+          // Use onSnapshot for userData so plan/feature changes reflect in real-time
+          // (e.g. after payment approval or admin override — no re-login needed)
+          userDocUnsub = onSnapshot(userRef, (snap) => {
+            if (snap.exists()) setUserData(snap.data());
+          });
         } catch (err) {
           console.error("Failed to sync user profile:", err);
         }
@@ -528,7 +535,7 @@ body: JSON.stringify({
     };
     fetchStatus();
 
-    return () => unsubscribe();
+    return () => { unsubscribe(); if (userDocUnsub) userDocUnsub(); };
   }, []);
 
   // Firestore Listener
@@ -1034,7 +1041,18 @@ Track your document expiry dates with AI.
             <SubscriptionView 
               user={user} 
               upiSettings={upiSettings} 
-              razorpayKeyId={configStatus?.razorpayKeyId} 
+              razorpayKeyId={configStatus?.razorpayKeyId}
+              onPlanUpgraded={async () => {
+                // Re-fetch userData so plan change is visible immediately
+                // onSnapshot above will auto-update, but this forces a re-check
+                if (user) {
+                  try {
+                    const userRef = doc(db, "users", user.uid);
+                    const snap = await getDoc(userRef);
+                    if (snap.exists()) setUserData(snap.data());
+                  } catch (e) { /* onSnapshot will catch it */ }
+                }
+              }}
             />
           )}
           {activeTab === "privacy" && <PrivacyPolicy onBack={() => setActiveTab("dashboard")} />}
