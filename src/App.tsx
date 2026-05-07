@@ -1131,6 +1131,10 @@ Track your document expiry dates with AI.
                    setIsSavingUpi(false);
                 }
               }}
+              reportSettings={reportSettings}
+              setReportSettings={setReportSettings}
+              isSavingSettings={isSavingSettings}
+              onSaveReportSettings={saveReportSettings}
               onSaveProfile={saveProfile}
               whatsappPhone={whatsappPhone}
               setWhatsappPhone={setWhatsappPhone}
