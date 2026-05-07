@@ -94,6 +94,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [profileFile, setProfileFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [supportConfig, setSupportConfig] = React.useState({
+    supportEmail: "support@aitracker.in",
+    supportWhatsApp: "917210033172",
+    supportEmailLabel: "We typically respond within 24 hours.",
+    supportWhatsAppLabel: "Chat with us directly for quick help."
+  });
+
+  React.useEffect(() => {
+    fetch("/api/config/support")
+      .then(r => r.json())
+      .then(data => { if (data && !data.error) setSupportConfig(data); })
+      .catch(() => {});
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -447,7 +460,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-xl font-bold text-gray-900">Help & Support</h3>
-                <p className="text-sm text-gray-500">Need help? Contact our support team.</p>
+                <p className="text-sm text-gray-500">Need help? Our team typically responds within 24 hours.</p>
               </div>
               <span className="text-2xl">🛟</span>
             </div>
@@ -458,9 +471,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <div>
                   <p className="font-bold text-gray-900 text-sm">Email Support</p>
-                  <p className="text-xs text-gray-500 mb-2">We typically respond within 24 hours</p>
+                  <p className="text-xs text-gray-500 mb-2">{supportConfig.supportEmailLabel}</p>
                   <a
-                    href="mailto:himansh.cs91@gmail.com?subject=AI Tracker Support Request&body=User ID: ${user?.uid}%0AEmail: ${user?.email}%0A%0ADescribe your issue:"
+                    href={`mailto:${supportConfig.supportEmail}?subject=AI Tracker Support — ${encodeURIComponent(user?.email || '')}&body=User ID: ${user?.uid}%0AEmail: ${user?.email}%0A%0ADescribe your issue:%0A`}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all"
                   >
                     📧 Contact Support
@@ -473,9 +486,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <div>
                   <p className="font-bold text-gray-900 text-sm">WhatsApp Support</p>
-                  <p className="text-xs text-gray-500 mb-2">Quick support via WhatsApp</p>
+                  <p className="text-xs text-gray-500 mb-2">{supportConfig.supportWhatsAppLabel}</p>
                   <a
-                    href="https://wa.me/917210033172?text=Hi, I need help with AI Tracker. My email is ${encodeURIComponent(user?.email || '')}"
+                    href={`https://wa.me/${supportConfig.supportWhatsApp}?text=${encodeURIComponent(`Hi! I need help with AI Tracker.
+My email: ${user?.email || ''}
+User ID: ${user?.uid || ''}
+
+My issue: `)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-xl text-sm font-bold hover:bg-green-600 transition-all"
@@ -483,6 +500,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     💬 WhatsApp Support
                   </a>
                 </div>
+              </div>
+              <div className="mt-2 p-4 bg-white rounded-xl border border-blue-100 text-xs text-gray-500 leading-relaxed">
+                <p className="font-bold text-gray-700 mb-1">📋 Before contacting support, please include:</p>
+                <ul className="list-disc ml-4 space-y-0.5">
+                  <li>Your registered email address</li>
+                  <li>A brief description of the issue</li>
+                  <li>Screenshot if possible</li>
+                </ul>
               </div>
             </div>
           </div>
