@@ -1132,7 +1132,6 @@ Track your document expiry dates with AI.
                 }
               }}
               onSaveProfile={saveProfile}
-              userData={userData}
               whatsappPhone={whatsappPhone}
               setWhatsappPhone={setWhatsappPhone}
               isSendingWhatsAppReport={isSendingWhatsAppReport}
