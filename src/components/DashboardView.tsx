@@ -139,7 +139,7 @@ export function DashboardView({
                       {getStatus(doc.expiryDate)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500 font-medium">Expires on {doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd-MM-yyyy') : 'N/A'}</p>
+                  <p className="text-sm text-gray-500 font-medium">Expires on {doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd/MM/yyyy') : 'N/A'}</p>
                 </div>
                 <button 
                   onClick={() => onRenew(doc)}
