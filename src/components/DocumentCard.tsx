@@ -71,7 +71,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, onClick, onDele
       <div className="mt-6 pt-4 border-t border-gray-50 flex items-center justify-between">
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Expires On</p>
-          <p className="text-sm font-bold text-gray-700">{doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd-MM-yyyy') : 'No expiry set'}</p>
+          <p className="text-sm font-bold text-gray-700">{doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd/MM/yyyy') : 'No expiry set'}</p>
         </div>
         <div className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 border ${getStatusColor(doc.status)}`}>
           {getStatusIcon(doc.status)}
