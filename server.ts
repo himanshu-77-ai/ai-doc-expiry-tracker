@@ -1490,7 +1490,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Update User Report Settings
   app.post("/api/user/report-settings", async (req, res) => {
-    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime } = req.body;
+    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
     const authHeader = req.headers.authorization;
     const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
 
@@ -1512,6 +1512,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
           if (whatsappPhone || phone) updateData.whatsappPhone = whatsappPhone || phone;
           if (waFreq !== undefined) updateData.waReportFreq = waFreq;
           if (waTime !== undefined) updateData.waReportTime = waTime;
+          if (emailAlerts !== undefined) updateData.features = { emailAlerts };
 
           await db.collection("users").doc(userId).set(updateData, { merge: true });
           success = true;
@@ -2005,6 +2006,53 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   // UPI Pending Payment — save for admin approval
+  // ── Support Config ────────────────────────────────────────────────────────
+  app.get("/api/config/support", async (req, res) => {
+    try {
+      const defaults = {
+        supportEmail: "support@aitracker.in",
+        supportWhatsApp: "917210033172",
+        supportEmailLabel: "We typically respond within 24 hours.",
+        supportWhatsAppLabel: "Chat with us directly for quick help."
+      };
+      if (db) {
+        const doc = await db.collection("settings").doc("support").get();
+        if (doc.exists) return res.json({ ...defaults, ...doc.data() });
+      }
+      res.json(defaults);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/config/support", async (req, res) => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      const adminUid = process.env.ADMIN_UID;
+      if (!adminUid || decoded.uid !== adminUid) {
+        return res.status(403).json({ error: "Admin only" });
+      }
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    const { supportEmail, supportWhatsApp, supportEmailLabel, supportWhatsAppLabel } = req.body;
+    try {
+      if (db) {
+        await db.collection("settings").doc("support").set(
+          { supportEmail, supportWhatsApp, supportEmailLabel, supportWhatsAppLabel },
+          { merge: true }
+        );
+        return res.json({ success: true });
+      }
+      res.status(500).json({ error: "DB not ready" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/payments/upi-pending", async (req, res) => {
     const authHeader = req.headers["authorization"] as string;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
