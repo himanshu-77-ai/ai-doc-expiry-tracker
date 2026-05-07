@@ -91,6 +91,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [approvingPayment, setApprovingPayment] = useState<string | null>(null);
+  const [supportConfig, setSupportConfig] = useState({
+    supportEmail: "",
+    supportWhatsApp: "",
+    supportEmailLabel: "",
+    supportWhatsAppLabel: ""
+  });
+  const [savingSupport, setSavingSupport] = useState(false);
+  const [savedSupport, setSavedSupport] = useState(false);
 
   // Guard — only admin
   if (currentUserId !== ADMIN_UID) {
@@ -122,7 +130,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
     }
   };
 
-  useEffect(() => { fetchUsers(); fetchPendingPayments(); }, []);
+  useEffect(() => { fetchUsers(); fetchPendingPayments(); fetchSupportConfig(); }, []);
 
   // ── FETCH PENDING PAYMENTS ─────────────────────────────────────────────────
   const fetchPendingPayments = async () => {
@@ -137,6 +145,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
       }
     } catch (e) {
       console.error("Failed to fetch pending payments:", e);
+    }
+  };
+
+  // ── FETCH SUPPORT CONFIG ───────────────────────────────────────────────────
+  const fetchSupportConfig = async () => {
+    try {
+      const res = await fetch("/api/config/support");
+      if (res.ok) {
+        const data = await res.json();
+        setSupportConfig(data);
+      }
+    } catch (e) { console.error("Failed to fetch support config:", e); }
+  };
+
+  // ── SAVE SUPPORT CONFIG ────────────────────────────────────────────────────
+  const saveSupportConfig = async () => {
+    setSavingSupport(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/config/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify(supportConfig)
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setSavedSupport(true);
+      setTimeout(() => setSavedSupport(false), 2500);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSavingSupport(false);
     }
   };
 
@@ -322,6 +361,72 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
           </div>
         </div>
       )}
+
+      {/* App Settings — Support Config */}
+      <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">App Settings — Help & Support</h3>
+            <p className="text-sm text-gray-500">Update support contact details shown to all users.</p>
+          </div>
+          {savedSupport && (
+            <span className="flex items-center gap-1 text-green-600 text-sm font-medium">
+              <CheckCircle size={16} /> Saved!
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-700">Support Email</label>
+            <input
+              type="email"
+              placeholder="e.g. support@yourcompany.com"
+              value={supportConfig.supportEmail}
+              onChange={e => setSupportConfig(prev => ({ ...prev, supportEmail: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-700">Support WhatsApp Number</label>
+            <input
+              type="text"
+              placeholder="e.g. 917210033172 (with country code, no +)"
+              value={supportConfig.supportWhatsApp}
+              onChange={e => setSupportConfig(prev => ({ ...prev, supportWhatsApp: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-700">Email Support Note</label>
+            <input
+              type="text"
+              placeholder="e.g. We typically respond within 24 hours."
+              value={supportConfig.supportEmailLabel}
+              onChange={e => setSupportConfig(prev => ({ ...prev, supportEmailLabel: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-gray-700">WhatsApp Support Note</label>
+            <input
+              type="text"
+              placeholder="e.g. Chat with us directly for quick help."
+              value={supportConfig.supportWhatsAppLabel}
+              onChange={e => setSupportConfig(prev => ({ ...prev, supportWhatsAppLabel: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end mt-5">
+          <button
+            onClick={saveSupportConfig}
+            disabled={savingSupport}
+            className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2"
+          >
+            {savingSupport ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : <><Save size={16} /> Save Support Details</>}
+          </button>
+        </div>
+      </div>
 
       {/* Users List */}
       {loading ? (
