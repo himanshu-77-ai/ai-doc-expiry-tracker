@@ -12,7 +12,7 @@ import {
   Edit,
   ExternalLink
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Document } from "../types";
 import { cn, getDynamicStatus } from "../lib/utils";
 
