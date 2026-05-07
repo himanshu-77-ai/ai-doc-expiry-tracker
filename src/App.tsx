@@ -1088,10 +1088,6 @@ Track your document expiry dates with AI.
               onTriggerReminders={triggerReminders}
               isSendingReport={isSendingReport}
               onSendReport={sendReport}
-              reportSettings={reportSettings}
-              setReportSettings={setReportSettings}
-              isSavingSettings={isSavingSettings}
-              onSaveReportSettings={saveReportSettings}
               expiryInterval={expiryInterval ?? 30}
               setExpiryInterval={setExpiryInterval}
               upiSettings={upiSettings}
@@ -1205,10 +1201,6 @@ Track your document expiry dates with AI.
               documents={documents}
               isSendingReport={isSendingReport}
               onSendReport={sendReport}
-              reportSettings={reportSettings}
-              onSaveReportSettings={saveReportSettings}
-              setReportSettings={setReportSettings}
-              isSavingSettings={isSavingSettings}
               expiryInterval={expiryInterval ?? 30}
             />
           )}
