@@ -12,7 +12,7 @@ import { auth } from "../lib/firebase";
 // which gets it from the server /api/config/status response or firebase claims.
 // We keep a local reference purely for the "Access Denied" guard — the server
 // independently verifies the Firebase ID token, so spoofing this has no effect.
-export const ADMIN_UID = import.meta.env.VITE_ADMIN_UID || "";
+export const ADMIN_UID = import.meta.env.VITE_ADMIN_UID || "v7U6iaF8wpXBLE9m1A3Crbeq5hq2";
 
 export const PLAN_CONFIG = {
   free:    { label: "Free",    docLimit: 5,  price: "$0"  },
@@ -343,7 +343,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserId }) => {
                 <div>
                   <p className="font-semibold text-gray-900 text-sm">{p.userEmail}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Plan: <strong>{p.plan}</strong> · Amount: ₹{p.amount} · {new Date(p.createdAt).toLocaleDateString()}
+                    Plan: <strong>{p.plan}</strong> · Amount: ₹{p.amount} · {new Date(p.createdAt).toLocaleDateString('en-IN', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
                   </p>
                 </div>
                 <button
