@@ -8,7 +8,6 @@ import {
   Mail,
   Loader2,
   CheckCircle2,
-  Calendar
 } from "lucide-react";
 import { getDynamicStatus } from "../lib/utils";
 
@@ -16,10 +15,6 @@ interface ReportsViewProps {
   documents: any[];
   isSendingReport: boolean;
   onSendReport: () => void;
-  reportSettings: any;
-  onSaveReportSettings: () => void;
-  setReportSettings: (settings: any) => void;
-  isSavingSettings: boolean;
   expiryInterval: number;
 }
 
@@ -27,10 +22,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   documents,
   isSendingReport,
   onSendReport,
-  reportSettings,
-  onSaveReportSettings,
-  setReportSettings,
-  isSavingSettings,
   expiryInterval
 }) => {
   const stats = {
@@ -83,47 +74,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] border border-gray-100 shadow-sm">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold">Reporting Schedule</h3>
-            <Calendar className="text-blue-600" />
-          </div>
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-700">Frequency</label>
-                <select 
-                  value={reportSettings.frequency}
-                  onChange={(e) => setReportSettings({ ...reportSettings, frequency: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="none">Paused (No Auto-Reports)</option>
-                  <option value="daily">Every Morning</option>
-                  <option value="weekly">Every Monday</option>
-                  <option value="monthly">1st of Month</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-700">Preferred Time</label>
-                <input 
-                  type="time" 
-                  value={reportSettings.time}
-                  onChange={(e) => setReportSettings({ ...reportSettings, time: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" 
-                />
-              </div>
-            </div>
-            <button 
-              onClick={onSaveReportSettings}
-              disabled={isSavingSettings}
-              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-            >
-              {isSavingSettings ? <Loader2 className="animate-spin" size={20} /> : "Save Report Schedule"}
-            </button>
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 gap-6">
         <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[2rem] text-white shadow-xl shadow-blue-200 flex flex-col justify-between">
           <div className="space-y-4">
             <TrendingUp size={48} className="opacity-50" />
