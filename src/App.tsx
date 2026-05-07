@@ -243,15 +243,15 @@ export default function App() {
     try {
       const response = await fetch("/api/user/report-settings", {
         method: "POST",
-        headers: { 
-  "Content-Type": "application/json",
-  "Authorization": `Bearer ${await user.getIdToken()}`
-},
-body: JSON.stringify({
-  userId: user.uid,
-  expiryInterval,
-  ...reportSettings
-})
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${await user.getIdToken()}`
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          expiryInterval,
+          ...reportSettings
+        })
       });
       if (response.ok) {
         alert("Report schedule updated successfully!");
@@ -772,11 +772,11 @@ body: JSON.stringify({
         return {
           'Document Name': d.title,
           'Category': d.category,
-          'Expiry Date': d.expiryDate,
+          'Expiry Date': d.expiryDate ? format(parseISO(d.expiryDate), 'dd-MM-yyyy') : 'N/A',
           'Status': d.status === 'Renewed' ? 'Renewed' : getStatus(d.expiryDate),
           'Document Number': d.documentNumber || 'N/A',
           'Summary': d.summary || 'N/A',
-          'Created At': createdAtDate ? format(createdAtDate, 'yyyy-MM-dd HH:mm') : 'N/A'
+          'Created At': createdAtDate ? format(createdAtDate, 'dd-MM-yyyy HH:mm') : 'N/A'
         };
       });
 
