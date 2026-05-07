@@ -120,7 +120,16 @@ async function sendWhatsApp(to: string, message: string) {
   const twilio = await import("twilio");
   const client = (twilio as any).default ? (twilio as any).default(sid, token) : (twilio as any)(sid, token);
   const from = process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886";
-  const toWA = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  // Normalize number: strip "whatsapp:" prefix if present, then ensure + prefix
+  let normalized = to.replace(/^whatsapp:/i, "").trim();
+  // If number is 10 digits (Indian mobile without country code), add +91
+  if (/^\d{10}$/.test(normalized)) normalized = "+91" + normalized;
+  // If number starts with 91 and is 12 digits, add +
+  else if (/^91\d{10}$/.test(normalized)) normalized = "+" + normalized;
+  // If no + prefix at all, add +
+  else if (!normalized.startsWith("+")) normalized = "+" + normalized;
+  const toWA = `whatsapp:${normalized}`;
+  console.log(`[WhatsApp] Sending to ${toWA}`);
   return await client.messages.create({ from, to: toWA, body: message });
 }
 
@@ -149,7 +158,10 @@ function buildWhatsAppReport(docs: any[], interval: number = 30, title: string =
 
   if (expired.length > 0) {
     lines.push("EXPIRED (Action Required):");
-    expired.slice(0, 5).forEach((d: any) => lines.push("- " + d.title + " | " + d.expiryDate));
+    expired.slice(0, 5).forEach((d: any) => {
+      const formatted = d.expiryDate ? new Date(d.expiryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'2-digit', year:'numeric' }) : 'N/A';
+      lines.push("- " + d.title + " | " + formatted);
+    });
     if (expired.length > 5) lines.push("  ...and " + (expired.length - 5) + " more");
     lines.push("");
   }
@@ -157,7 +169,8 @@ function buildWhatsAppReport(docs: any[], interval: number = 30, title: string =
     lines.push("EXPIRING SOON:");
     expiring.slice(0, 5).forEach((d: any) => {
       const diff = Math.ceil((new Date(d.expiryDate).getTime() - now.getTime()) / 86400000);
-      lines.push("- " + d.title + " | " + d.expiryDate + " (" + diff + " days)");
+      const formatted = d.expiryDate ? new Date(d.expiryDate).toLocaleDateString('en-IN', { day:'2-digit', month:'2-digit', year:'numeric' }) : 'N/A';
+      lines.push("- " + d.title + " | " + formatted + " (" + diff + " days)");
     });
     if (expiring.length > 5) lines.push("  ...and " + (expiring.length - 5) + " more");
     lines.push("");
