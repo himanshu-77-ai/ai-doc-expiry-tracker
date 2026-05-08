@@ -424,6 +424,24 @@ async function startServer() {
 
   app.use(express.json());
 
+  // ── Rate limiter (in-memory) ──────────────────────────────────────────────
+  const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+  function rateLimit(req: any, res: any, max: number, windowMs: number): boolean {
+    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    const now = Date.now();
+    const entry = rateLimitMap.get(ip);
+    if (!entry || now > entry.resetAt) {
+      rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+      return true;
+    }
+    if (entry.count >= max) {
+      res.status(429).json({ error: "Too many requests. Please wait." });
+      return false;
+    }
+    entry.count++;
+    return true;
+  }
+
   // ── KEEP-ALIVE & HEALTH (cron-job.org) ──────────────────────────────────
   // Keep Alive job:  GET  /api/health        every 10 min
   // Reminders job:   POST /api/ping/reminders daily 9 AM
@@ -1831,7 +1849,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const tryFetchUsers = async () => {
         try {
           if (db) {
-            const usersSnapshot = await db.collection("users").where("reportSettings.frequency", "!=", "none").get();
+            // Get ALL users — filter in code to include WA-only users
+            const usersSnapshot = await db.collection("users").get();
             const fetched = usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             if (fetched.length > 0) return fetched;
           }
@@ -1906,7 +1925,6 @@ https://ai-doc-expiry-tracker.onrender.com`;
             let waShouldSend = !waLastSent;
             if (waLastSent) {
               const waDiff = (now.getTime() - waLastSent.getTime()) / (1000 * 60 * 60 * 24);
-              // Use date-only comparison for daily to avoid timezone edge cases
               const todayStr = now.toISOString().split("T")[0];
               const lastSentStr = waLastSent.toISOString().split("T")[0];
               if (waFreq === "daily"   && todayStr !== lastSentStr) waShouldSend = true;
