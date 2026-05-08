@@ -53,6 +53,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
       name: "Monthly", 
       price: "5", 
       inrPrice: "450",
+      inrAnnual: "5400",
       period: "month",
       features: [
         "10 Documents",
@@ -283,7 +284,11 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
               <span className="text-gray-500 font-medium">/ {(plan as any).period}</span>
             </div>
             {plan.price !== "0" && (
-              <p className="text-sm text-gray-600 font-medium mb-1">≈ ₹{(plan as any).inrPrice} / {(plan as any).period}</p>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl font-bold text-orange-600">₹{(plan as any).inrPrice}</span>
+                <span className="text-gray-500 text-sm font-medium">/ {(plan as any).period}</span>
+                <span className="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-0.5 rounded-full font-semibold">INR</span>
+              </div>
             )}
             {plan.price === "0" && (
               <p className="text-sm text-gray-400 mb-1">Free forever</p>
@@ -293,7 +298,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
               {plan.features.map((feature) => (
                 <li key={feature} className="flex items-center gap-3 text-gray-600">
                   <Check size={18} className="text-blue-600" />
-                  <span className="text-sm font-medium">{feature}</span>
+                  <span className="text-sm font-semibold text-gray-700">{feature}</span>
                 </li>
               ))}
             </ul>
