@@ -318,16 +318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
 
               {/* Test Storage — Admin only */}
-              {isAdmin && (
-                <button 
-                  disabled={isTestingStorage}
-                  onClick={onTestStorage}
-                  className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-500/20 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {isTestingStorage ? <Loader2 className="animate-spin" size={18} /> : <Globe size={18} />}
-                  Test Storage Connection
-                </button>
-              )}
+              {/* Test Storage hidden — requires Firebase Blaze plan */}
 
               <button
                 disabled={isSendingWhatsAppReport || (!whatsappPhone && !localPhone && !userData?.whatsappPhone)}
