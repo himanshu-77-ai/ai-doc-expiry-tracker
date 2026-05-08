@@ -1114,15 +1114,20 @@ Track your document expiry dates with AI.
               onSaveUpiSettings={async () => {
                 setIsSavingUpi(true);
                 try {
+                  const token = await user?.getIdToken();
                   const response = await fetch("/api/config/upi", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${token}`
+                    },
                     body: JSON.stringify(upiSettings)
                   });
                   if (response.ok) {
                     alert("UPI settings saved successfully!");
                   } else {
-                    alert("Failed to save UPI settings.");
+                    const err = await response.json().catch(() => ({}));
+                    alert("Failed to save UPI settings: " + (err.error || response.status));
                   }
                 } catch (err) {
                   console.error("Save UPI error:", err);
