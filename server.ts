@@ -2025,7 +2025,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
   app.get("/api/config/support", async (req, res) => {
     try {
       const defaults = {
-        supportEmail: "support@aitracker.in",
+        supportEmail: process.env.SMTP_USER || "support@aitracker.in",
         supportWhatsApp: "917210033172",
         supportEmailLabel: "We typically respond within 24 hours.",
         supportWhatsAppLabel: "Chat with us directly for quick help."
