@@ -179,14 +179,15 @@ export default function App() {
   const [isSendingWhatsAppReport, setIsSendingWhatsAppReport] = useState(false);
 
   const onSendWhatsAppReport = async () => {
-    if (!user || !whatsappPhone) return;
+    const phoneToUse = whatsappPhone || (userData as any)?.whatsappPhone || "";
+    if (!user || !phoneToUse) return;
     setIsSendingWhatsAppReport(true);
     try {
       const res = await fetch("/api/notifications/whatsapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          to: whatsappPhone, 
+          to: phoneToUse, 
           message: `📊 AI Tracker Report\n\nTotal: ${documents.length} docs\nExpired: ${stats.expired} | Expiring Soon: ${stats.expiring} | Safe: ${stats.safe}\n\nView: https://ai-doc-expiry-tracker.onrender.com`,
           type: "whatsapp" 
         })
