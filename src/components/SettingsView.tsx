@@ -582,7 +582,7 @@ My issue: `)}`}
                       <td className="px-4 py-3 font-bold text-gray-900 line-clamp-1">{doc.title}</td>
                       <td className="px-4 py-3">
                         {doc.createdAt && (doc.createdAt as any).toDate 
-                          ? format( (doc.createdAt as any).toDate(), 'MMM dd, HH:mm')
+                          ? format( (doc.createdAt as any).toDate(), 'dd-MM-yyyy HH:mm')
                           : 'Recent'}
                       </td>
                       <td className="px-4 py-3">
