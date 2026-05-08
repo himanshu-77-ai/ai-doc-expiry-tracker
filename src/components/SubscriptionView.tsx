@@ -283,7 +283,7 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
               <span className="text-gray-500 font-medium">/ {(plan as any).period}</span>
             </div>
             {plan.price !== "0" && (
-              <p className="text-sm text-gray-400 mb-1">≈ ₹{(plan as any).inrPrice} / {(plan as any).period}</p>
+              <p className="text-sm text-gray-600 font-medium mb-1">≈ ₹{(plan as any).inrPrice} / {(plan as any).period}</p>
             )}
             {plan.price === "0" && (
               <p className="text-sm text-gray-400 mb-1">Free forever</p>
