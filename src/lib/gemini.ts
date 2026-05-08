@@ -31,7 +31,9 @@ export const extractDocumentInfo = async (base64Image: string, mimeType: string)
             content: [
               {
                 type: "text",
-                text: `Analyze this document image and extract the following fields. Return ONLY a valid JSON object with no extra text:
+                text: `Analyze this document image carefully and extract the following fields.
+                CRITICAL: Read ALL digits in dates very carefully. If a year shows "2036" return 2036 NOT 2026. Read each digit precisely - do not confuse similar-looking digits.
+                Return ONLY a valid JSON object with no extra text, no markdown:
                 {
                   "title": "short document name",
                   "expiryDate": "YYYY-MM-DD or null",
@@ -39,7 +41,8 @@ export const extractDocumentInfo = async (base64Image: string, mimeType: string)
                   "documentNumber": "document number or null",
                   "category": "one of: Identity, License, Insurance, Invoice, Other",
                   "summary": "one sentence summary"
-                }`
+                }
+                Double-check every year digit before returning.`
               },
               {
                 type: "image_url",
@@ -69,6 +72,34 @@ export const extractDocumentInfo = async (base64Image: string, mimeType: string)
     // Clean and parse JSON
     const clean = text.replace(/```json|```/g, "").trim();
     const info = JSON.parse(clean);
+
+    // ── POST-PROCESSING: Validate and correct dates ──────────────────────────
+    const currentYear = new Date().getFullYear();
+    const fixDate = (dateStr: string | null): string | null => {
+      if (!dateStr) return null;
+      // Accept YYYY-MM-DD format
+      const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return dateStr;
+      let year = parseInt(match[1]);
+      const month = match[2];
+      const day = match[3];
+      // If year looks like a typo (e.g. 2026 when doc clearly shows 2036),
+      // we can't auto-correct, but we flag implausible past expiry years
+      // Rule: expiry year should be >= currentYear - 5 (not expired more than 5 years ago)
+      // and <= currentYear + 50 (not more than 50 years in future)
+      if (year < currentYear - 5) {
+        console.warn(`[OCR] Suspicious past expiry year: ${year}. Keeping as-is — verify manually.`);
+      }
+      if (year > currentYear + 50) {
+        console.warn(`[OCR] Suspicious future expiry year: ${year}. Keeping as-is — verify manually.`);
+      }
+      return `${year}-${month}-${day}`;
+    };
+
+    if (info.expiryDate) info.expiryDate = fixDate(info.expiryDate);
+    if (info.issueDate) info.issueDate = fixDate(info.issueDate);
+    // ─────────────────────────────────────────────────────────────────────────
+
     console.log("AI Extraction success:", info);
     return info;
 
