@@ -330,9 +330,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               )}
 
               <button
-                disabled={isSendingWhatsAppReport || !whatsappPhone}
+                disabled={isSendingWhatsAppReport || (!whatsappPhone && !localPhone && !userData?.whatsappPhone)}
                 onClick={onSendWhatsAppReport}
-                title={!whatsappPhone ? "Save WhatsApp number in Account Settings first" : ""}
+                title={(!whatsappPhone && !localPhone && !userData?.whatsappPhone) ? "Save WhatsApp number in Account Settings first" : ""}
                 className="px-6 py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all shadow-lg shadow-green-400/20 disabled:opacity-50 flex items-center gap-2"
               >
                 {isSendingWhatsAppReport ? <Loader2 className="animate-spin" size={18} /> : <MessageCircle size={18} />}
@@ -586,13 +586,18 @@ My issue: `)}`}
                           : 'Recent'}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full ${doc.fileUrl ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {doc.fileUrl ? 'IMAGE SAVED' : 'NO IMAGE'}
+                        <span className={`px-2 py-0.5 rounded-full ${doc.fileUrl ? 'bg-green-100 text-green-700' : doc.fileData ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {doc.fileUrl ? 'IMAGE SAVED' : doc.fileData ? 'SAVED (Local)' : 'NO IMAGE'}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        {doc.fileUrl && (
-                          <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">View</a>
+                        {(doc.fileUrl || doc.fileData) && (
+                          <a
+                            href={doc.fileUrl || `data:image/jpeg;base64,${doc.fileData}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >View</a>
                         )}
                       </td>
                     </tr>
