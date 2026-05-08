@@ -1906,7 +1906,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
             let waShouldSend = !waLastSent;
             if (waLastSent) {
               const waDiff = (now.getTime() - waLastSent.getTime()) / (1000 * 60 * 60 * 24);
-              if (waFreq === "daily"   && waDiff >= 0.9)  waShouldSend = true;
+              // Use date-only comparison for daily to avoid timezone edge cases
+              const todayStr = now.toISOString().split("T")[0];
+              const lastSentStr = waLastSent.toISOString().split("T")[0];
+              if (waFreq === "daily"   && todayStr !== lastSentStr) waShouldSend = true;
               if (waFreq === "weekly"  && waDiff >= 6.9)  waShouldSend = true;
               if (waFreq === "monthly" && waDiff >= 27.9) waShouldSend = true;
             }
