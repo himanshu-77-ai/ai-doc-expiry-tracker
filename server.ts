@@ -71,7 +71,10 @@ interface DocumentData {
 }
 
 function getStatusInfo(expiryDate: string, interval: number = 30) {
-  const diff = Math.ceil((new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+  // Midnight-normalized to match client-side date-fns differenceInDays logic
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const expiry = new Date(expiryDate); expiry.setHours(0, 0, 0, 0);
+  const diff = Math.round((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   if (diff < 0) return { text: "Expired", color: "#EF4444" };
   if (diff <= interval) return { text: "Expiring Soon", color: "#F59E0B" };
   return { text: "Safe", color: "#10B981" };
@@ -423,24 +426,6 @@ async function startServer() {
   }
 
   app.use(express.json());
-
-  // ── Rate limiter (in-memory) ──────────────────────────────────────────────
-  const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-  function rateLimit(req: any, res: any, max: number, windowMs: number): boolean {
-    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-    if (!entry || now > entry.resetAt) {
-      rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
-      return true;
-    }
-    if (entry.count >= max) {
-      res.status(429).json({ error: "Too many requests. Please wait." });
-      return false;
-    }
-    entry.count++;
-    return true;
-  }
 
   // ── KEEP-ALIVE & HEALTH (cron-job.org) ──────────────────────────────────
   // Keep Alive job:  GET  /api/health        every 10 min
@@ -929,6 +914,14 @@ _AI Tracker — Smart Document Intelligence_`;
 
   // WhatsApp Send Route
   app.post("/api/notifications/whatsapp", async (req, res) => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
     const { to, message } = req.body;
     if (!to || !message) return res.status(400).json({ error: "Missing to or message" });
     try {
@@ -1315,6 +1308,15 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Manual Trigger for Testing Reminders
   app.post("/api/notifications/trigger-reminders", async (req, res) => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      if (decoded.uid !== process.env.ADMIN_UID) return res.status(403).json({ error: "Admin only" });
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
     const result = await checkAndSendReminders();
     if (result.success) {
       res.json({ success: true, sent: result.sentCount || 0, message: "ok" });
@@ -1360,6 +1362,16 @@ https://ai-doc-expiry-tracker.onrender.com`;
       
       if (!userId || !email) {
         return res.status(400).json({ error: "Missing userId or email" });
+      }
+
+      // Verify token matches userId to prevent cross-user report access
+      if (token) {
+        try {
+          const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+          if (decoded.uid !== userId) return res.status(403).json({ error: "Forbidden: token userId mismatch" });
+        } catch {
+          return res.status(401).json({ error: "Invalid token" });
+        }
       }
 
       try {
@@ -1849,8 +1861,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const tryFetchUsers = async () => {
         try {
           if (db) {
-            // Get ALL users — filter in code to include WA-only users
-            const usersSnapshot = await db.collection("users").get();
+            const usersSnapshot = await db.collection("users").where("reportSettings.frequency", "!=", "none").get();
             const fetched = usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             if (fetched.length > 0) return fetched;
           }
@@ -1925,6 +1936,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
             let waShouldSend = !waLastSent;
             if (waLastSent) {
               const waDiff = (now.getTime() - waLastSent.getTime()) / (1000 * 60 * 60 * 24);
+              // Use date-only comparison for daily to avoid timezone edge cases
               const todayStr = now.toISOString().split("T")[0];
               const lastSentStr = waLastSent.toISOString().split("T")[0];
               if (waFreq === "daily"   && todayStr !== lastSentStr) waShouldSend = true;
