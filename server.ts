@@ -1760,21 +1760,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `
       });
 
-      // WhatsApp scheduled report (if phone saved)
-      try {
-        let userPhone = "";
-        if (db) {
-          const uSnap = await db.collection("users").doc(userId).get();
-          if (uSnap.exists) userPhone = uSnap.data()?.whatsappPhone || "";
-        }
-        if (userPhone) {
-          const waMsg = buildWhatsAppReport(docs as any[], interval, "📊 Scheduled Status Report");
-          await sendWhatsApp(userPhone, waMsg);
-          console.log(`[Scheduled Report] WhatsApp sent to ${userPhone}`);
-        }
-      } catch (waErr: any) {
-        console.error("[Scheduled Report] WhatsApp failed:", waErr.message);
-      }
+      // NOTE: WhatsApp is handled separately by checkScheduledReports() WA block
+      // Do NOT send WhatsApp here to avoid duplicate messages
 
       // Update lastSent
       const nowIso = new Date().toISOString();
