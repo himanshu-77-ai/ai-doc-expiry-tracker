@@ -190,7 +190,54 @@ function buildWhatsAppReport(docs: any[], interval: number = 30, title: string =
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3000", 10);
+
+  // ═══════════════════════════════════════════════════════════════
+  // AUTH HELPERS — hoisted to top so all routes can use them
+  // ═══════════════════════════════════════════════════════════════
+  const ADMIN_UID = process.env.ADMIN_UID;
+  if (!ADMIN_UID) {
+    console.error("[Admin] ADMIN_UID env var not set — admin routes will be disabled.");
+  }
+
+  // Secure server-side admin check using Firebase ID token
+  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
+    if (!ADMIN_UID) {
+      res.status(503).json({ error: "Admin not configured" });
+      return false;
+    }
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) {
+      res.status(401).json({ error: "Missing authorization token" });
+      return false;
+    }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      if (decoded.uid !== ADMIN_UID) {
+        res.status(403).json({ error: "Unauthorized: not admin" });
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return false;
+    }
+  };
+
+  // Verify any logged-in user — returns decoded token uid or null
+  const verifyUser = async (req: any, res: any): Promise<string | null> => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      return decoded.uid;
+    } catch {
+      res.status(401).json({ error: "Invalid token" });
+      return null;
+    }
+  };
 
   let projectId = "";
   let configProjectId = "";
@@ -535,8 +582,8 @@ async function startServer() {
       const saToken = await getServiceAccountToken();
       let tokenInfo = null;
       if (saToken) {
-        const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
-        tokenInfo = await res.json();
+        const tokenRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
+        tokenInfo = await tokenRes.json();
       }
 
       const { saUniqueId, saEmail } = await getServiceAccountInfo();
@@ -999,9 +1046,9 @@ _AI Tracker — Smart Document Intelligence_`;
       const saToken = await getServiceAccountToken();
       if (!saToken) return { saUniqueId: null, saEmail: null };
 
-      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
-      if (res.ok) {
-        const data: any = await res.json();
+      const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
+      if (tokenInfoRes.ok) {
+        const data: any = await tokenInfoRes.json();
         // For service accounts, 'sub', 'user_id', 'azp', or 'aud' can contain the numeric unique ID
         return { 
           saUniqueId: data.sub || data.user_id || data.azp || data.aud || null, 
@@ -1383,28 +1430,25 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       // Verify token matches userId to prevent cross-user report access
       if (!token) return res.status(401).json({ error: "Unauthorized" });
-      if (token) {
-        try {
-          const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-          if (decoded.uid !== userId) return res.status(403).json({ error: "Forbidden: token userId mismatch" });
-        } catch {
-          return res.status(401).json({ error: "Invalid token" });
-        }
+      try {
+        const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+        if (decoded.uid !== userId) return res.status(403).json({ error: "Forbidden: token userId mismatch" });
+      } catch {
+        return res.status(401).json({ error: "Invalid token" });
       }
 
       try {
         let docs: DocumentData[] = [];
-      
-      try {
-        if (!db) throw new Error("Database not initialized");
-        console.log(`[Report] Fetching documents for userId: ${userId} via Admin SDK`);
-        const docsSnapshot = await db.collection("documents").where("userId", "==", userId).get();
-        docs = docsSnapshot.docs.map(d => d.data() as DocumentData);
-      } catch (adminErr: any) {
-        console.info(`[Report] Using REST API path for document retrieval (Admin SDK restricted)`);
-        docs = await firestoreRest("documents", { userId, token }) as any;
-        console.log(`[Report] REST path found ${docs.length} documents`);
-      }
+        try {
+          if (!db) throw new Error("Database not initialized");
+          console.log(`[Report] Fetching documents for userId: ${userId} via Admin SDK`);
+          const docsSnapshot = await db.collection("documents").where("userId", "==", userId).get();
+          docs = docsSnapshot.docs.map(d => d.data() as DocumentData);
+        } catch (adminErr: any) {
+          console.info(`[Report] Using REST API path for document retrieval (Admin SDK restricted)`);
+          docs = await firestoreRest("documents", { userId, token }) as any;
+          console.log(`[Report] REST path found ${docs.length} documents`);
+        }
       
       // Fetch user to get expiryInterval preference
       let userPref: any = { expiryInterval: "30" };
@@ -1512,7 +1556,9 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       if (!success) {
         const saToken = await getServiceAccountToken();
-        const effectiveToken = userToken || saToken;
+        const rawAuthHeader = req.headers["authorization"] as string;
+        const bearerToken = rawAuthHeader?.startsWith("Bearer ") ? rawAuthHeader.slice(7) : null;
+        const effectiveToken = bearerToken || saToken;
         const updateData = {
           fields: {
             displayName: { stringValue: displayName },
@@ -1550,13 +1596,14 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   // Update User Report Settings
-    app.post("/api/user/report-settings", async (req, res) => {
+  app.post("/api/user/report-settings", async (req, res) => {
     const uid = await verifyUser(req, res);
     if (!uid) return;
     const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
-    if (!userId)
+    if (!userId) {
       return res.status(400).json({ error: "Missing userId" });
     }
+    if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
 
     try {
       let success = false;
@@ -1584,7 +1631,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
       if (!success) {
         // REST fallback for setting user preferences
         const saToken = await getServiceAccountToken();
-        const effectiveToken = userToken || saToken;
+        const rawAuthHeader2 = req.headers["authorization"] as string;
+        const bearerToken2 = rawAuthHeader2?.startsWith("Bearer ") ? rawAuthHeader2.slice(7) : null;
+        const effectiveToken = bearerToken2 || saToken;
+        const currentApiKey = getFirebaseConfig().apiKey || apiKey;
         
         const updateData: any = {
           fields: {}
@@ -1617,7 +1667,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
             if (useToken && effectiveToken) {
               headers["Authorization"] = `Bearer ${effectiveToken}`;
             } else {
-              url += `${url.includes('?') ? '&' : '?'}key=${apiKey}`;
+              url += `${url.includes('?') ? '&' : '?'}key=${currentApiKey}`;
             }
             
             if (useUpdateMask) {
@@ -1637,36 +1687,36 @@ https://ai-doc-expiry-tracker.onrender.com`;
             });
           };
 
-          console.log(`[Report Settings] Attempting REST PATCH to ${dbId} for user ${userId} (Token: ${effectiveToken ? (userToken ? 'User' : 'SA') : 'None'})`);
+          console.log(`[Report Settings] Attempting REST PATCH to ${dbId} for user ${userId} (Token: ${effectiveToken ? (bearerToken2 ? 'User' : 'SA') : 'None'})`);
           
           // 1. Try with token and updateMask
-          let res = await performRequest(true, true);
+          let fetchRes = await performRequest(true, true);
 
           // 2. Fallback to API Key if Token failed with 403 or 401
-          if (!res.ok && (res.status === 403 || res.status === 401) && effectiveToken) {
-            console.info(`[Report Settings] REST PATCH Auth Error (${res.status}), falling back to API Key for ${dbId}`);
-            res = await performRequest(false, true);
+          if (!fetchRes.ok && (fetchRes.status === 403 || fetchRes.status === 401) && effectiveToken) {
+            console.info(`[Report Settings] REST PATCH Auth Error (${fetchRes.status}), falling back to API Key for ${dbId}`);
+            fetchRes = await performRequest(false, true);
           }
 
           // 3. If 404, the document doesn't exist. Create it.
-          if (res.status === 404) {
+          if (fetchRes.status === 404) {
             console.log(`[Report Settings] Document not found, creating new user document for ${userId}`);
             // Try create with token first
-            res = await performRequest(true, false);
+            fetchRes = await performRequest(true, false);
             
             // Fallback to API Key if Token failed with 403 or 401 on create
-            if (!res.ok && (res.status === 403 || res.status === 401) && effectiveToken) {
-              console.info(`[Report Settings] REST CREATE Auth Error (${res.status}), falling back to API Key for ${dbId}`);
-              res = await performRequest(false, false);
+            if (!fetchRes.ok && (fetchRes.status === 403 || fetchRes.status === 401) && effectiveToken) {
+              console.info(`[Report Settings] REST CREATE Auth Error (${fetchRes.status}), falling back to API Key for ${dbId}`);
+              fetchRes = await performRequest(false, false);
             }
           }
           
-          if (!res.ok) {
-            const errBody = await res.text();
-            console.error(`[Report Settings] REST Update failed for ${dbId}: ${res.status} - ${errBody}`);
+          if (!fetchRes.ok) {
+            const errBody = await fetchRes.text();
+            console.error(`[Report Settings] REST Update failed for ${dbId}: ${fetchRes.status} - ${errBody}`);
           }
           
-          return res;
+          return fetchRes;
         };
 
         let restRes = await tryUpdate(databaseId);
@@ -1842,8 +1892,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
           });
         };
 
-        let res = await tryUpdate(databaseId);
-        if (!res.ok && databaseId !== "(default)") {
+        let updateRes = await tryUpdate(databaseId);
+        if (!updateRes.ok && databaseId !== "(default)") {
           await tryUpdate("(default)");
         }
       }
@@ -2280,49 +2330,6 @@ https://ai-doc-expiry-tracker.onrender.com`;
   // ═══════════════════════════════════════════════════════════════
   // ADMIN ROUTES — Only accessible by ADMIN_UID
   // ═══════════════════════════════════════════════════════════════
-  const ADMIN_UID = process.env.ADMIN_UID;
-  if (!ADMIN_UID) {
-    console.error("[Admin] ADMIN_UID env var not set — admin routes will be disabled.");
-  }
-
-  // Secure server-side admin check using Firebase ID token
-  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
-    if (!ADMIN_UID) {
-      res.status(503).json({ error: "Admin not configured" });
-      return false;
-    }
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) {
-      res.status(401).json({ error: "Missing authorization token" });
-      return false;
-    }
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      if (decoded.uid !== ADMIN_UID) {
-        res.status(403).json({ error: "Unauthorized: not admin" });
-        return false;
-      }
-      return true;
-    } catch (e: any) {
-      res.status(401).json({ error: "Invalid or expired token" });
-      return false;
-    }
-  };
-
-  // Verify any logged-in user — returns decoded token uid or null
-  const verifyUser = async (req: any, res: any): Promise<string | null> => {
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      return decoded.uid;
-    } catch {
-      res.status(401).json({ error: "Invalid token" });
-      return null;
-    }
-  };
 
   // GET all users
   app.get("/api/admin/users", async (req, res) => {
