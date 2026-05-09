@@ -38,8 +38,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const isAdmin = isAdminProp;
   const features = userData?.features || {};
-  const hasReports = isAdmin || features.reports !== false;
-  const hasInvite = isAdmin || features.inviteFriend !== false;
+  // Use same DEFAULT_FEATURES logic as App.tsx: false = locked unless explicitly granted
+  const hasReports   = isAdmin || features.reports === true;
+  const hasInvite    = isAdmin || features.inviteFriend !== false;
   const hasReminders = isAdmin || features.reminders !== false;
   const [isDesktop, setIsDesktop] = React.useState(typeof window !== 'undefined' && window.innerWidth >= 1024);
 
