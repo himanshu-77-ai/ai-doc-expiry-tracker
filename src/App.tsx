@@ -183,9 +183,13 @@ export default function App() {
     if (!user || !phoneToUse) return;
     setIsSendingWhatsAppReport(true);
     try {
+      const token = await user.getIdToken();
       const res = await fetch("/api/notifications/whatsapp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ 
           to: phoneToUse, 
           message: `📊 AI Tracker Report\n\nTotal: ${documents.length} docs\nExpired: ${stats.expired} | Expiring Soon: ${stats.expiring} | Safe: ${stats.safe}\n\nView: https://ai-doc-expiry-tracker.onrender.com`,
@@ -914,9 +918,13 @@ Track your document expiry dates with AI.
       }
 
       // Email via server
+      const inviteToken = await user.getIdToken();
       const response = await fetch("/api/invites/send", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${inviteToken}`
+        },
         body: JSON.stringify({ email: inviteEmail, phone: invitePhone, inviteLink, method })
       });
       if (response.ok) {
@@ -1089,9 +1097,13 @@ Track your document expiry dates with AI.
                 }
                 setIsSendingEmail(true);
                 try {
+                  const testEmailToken = await user.getIdToken();
                   const response = await fetch("/api/notifications/send-email", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { 
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${testEmailToken}`
+                    },
                     body: JSON.stringify({
                       to: user.email,
                       subject: "AI Tracker Test Email",
