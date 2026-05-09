@@ -607,6 +607,13 @@ export default function App() {
       setRenewModal(prev => ({ ...prev, error: "Invalid format. Please use DD-MM-YYYY (e.g. 25-04-2027)" }));
       return;
     }
+    // Warn if new expiry is in the past (allow for past-renewal recording but warn)
+    const newExpiryDate = new Date(storedExpiry);
+    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+    if (newExpiryDate < todayMidnight) {
+      const proceed = window.confirm("⚠️ Warning: This date is in the past.\n\nThe document will still show as \'Expired\' after renewing with a past date.\n\nContinue anyway? (e.g. recording a past renewal)");
+      if (!proceed) return;
+    }
     try {
       const docRef = doc(db, "documents", docObj.id);
       await updateDoc(docRef, {
@@ -632,7 +639,7 @@ export default function App() {
     }).length,
     expiring: documents.filter(d => {
       const computed = getStatus(d.expiryDate);
-      return computed === 'Expiring Soon';
+      return computed === 'Expiring Soon' && d.status !== 'Renewed';
     }).length,
     expired: documents.filter(d => {
       const computed = getStatus(d.expiryDate);
@@ -743,7 +750,7 @@ export default function App() {
         docsContext += "AT-RISK LIST (Expiring Soon):\n" + soonDocs.slice(0, 10).map(d => `- ${d.title} (Expires: ${d.expiryDate})`).join("\n") + (soonDocs.length > 10 ? "\n... and others" : "") + "\n\n";
       }
       if (safeDocs.length > 0) {
-        docsContext += "SECURE LIST:\n" + safeDocs.slice(0, 5).map(d => `- ${d.title} (Valid: ${d.expiryDate})`).join("\n") + (safeDocs.length > 5 ? `\n... plus ${safeDocs.length - 5} other secure items.` : "") + "\n\n";
+        docsContext += `SECURE LIST (showing up to 10 of ${safeDocs.length} total \u2014 counts in Summary are accurate):\n` + safeDocs.slice(0, 10).map(d => `- ${d.title} (Valid: ${d.expiryDate})`).join("\n") + (safeDocs.length > 10 ? `\n... and ${safeDocs.length - 10} more secure items.` : "") + "\n\n";
       }
 
       console.log("Chat Context Prep:", docsContext);
@@ -1223,13 +1230,33 @@ Track your document expiry dates with AI.
             />
           )}
 
-          {activeTab === "reports" && getEffectiveFeatures(userData).reports && (
-            <ReportsView 
-              documents={documents}
-              isSendingReport={isSendingReport}
-              onSendReport={sendReport}
-              expiryInterval={expiryInterval ?? 30}
-            />
+          {activeTab === "reports" && (
+            getEffectiveFeatures(userData).reports
+              ? (
+                <ReportsView 
+                  documents={documents}
+                  isSendingReport={isSendingReport}
+                  onSendReport={sendReport}
+                  expiryInterval={expiryInterval ?? 30}
+                />
+              )
+              : (
+                <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6 text-center px-4">
+                  <div className="w-20 h-20 bg-blue-50 text-blue-400 rounded-full flex items-center justify-center">
+                    <BarChart3 size={40} />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-2xl font-bold text-gray-900">Reports is a Premium Feature</h3>
+                    <p className="text-gray-500 max-w-sm">Upgrade to Monthly or Yearly plan to access Excel/PDF reports and email summaries.</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("subscription")}
+                    className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
+                  >
+                    View Plans & Upgrade
+                  </button>
+                </div>
+              )
           )}
 
           {/* Admin Panel — sirf ADMIN_UID ke liye visible */}
