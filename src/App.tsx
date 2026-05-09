@@ -1042,6 +1042,7 @@ Track your document expiry dates with AI.
               onEdit={setDocToEdit}
               onDelete={setDocToDelete}
               onView={setSelectedDoc}
+              expiryInterval={expiryInterval ?? 30}
             />
           )}
 
