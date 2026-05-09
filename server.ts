@@ -1846,7 +1846,14 @@ https://ai-doc-expiry-tracker.onrender.com`;
   }
 
   // Check and Send Scheduled Reports
+  let isCheckingReports = false; // Global lock to prevent duplicate execution
+
   async function checkScheduledReports() {
+    if (isCheckingReports) {
+      log("[Cron] checkScheduledReports already running, skipping this tick");
+      return;
+    }
+    isCheckingReports = true;
     const now = new Date();
     // Convert to IST (UTC+5:30) — user sets time in IST
     const istOffset = 5.5 * 60 * 60 * 1000;
@@ -1956,11 +1963,12 @@ https://ai-doc-expiry-tracker.onrender.com`;
                   parseInt(user.expiryInterval || "30"),
                   "📊 Scheduled WhatsApp Report"
                 );
-                await sendWhatsApp(waPhone, waMsg);
-                // Update waLastSent
+                // Update waLastSent BEFORE sending to prevent duplicate sends
+                // if cron fires again before Twilio responds
                 if (db) {
                   await db.collection("users").doc(user.id).update({ waLastSent: now.toISOString() });
                 }
+                await sendWhatsApp(waPhone, waMsg);
                 console.log(`[Cron] WhatsApp report sent to ${waPhone} (${waFreq})`);
               } catch (waErr: any) {
                 console.error(`[Cron] WhatsApp report failed for ${user.id}:`, waErr.message);
@@ -1971,6 +1979,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
       }
     } catch (e: any) {
       console.error("[Cron] Failed:", e.message);
+    } finally {
+      isCheckingReports = false; // Always release lock
     }
   }
 
