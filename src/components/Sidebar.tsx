@@ -37,11 +37,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isAdmin: isAdminProp = false
 }) => {
   const isAdmin = isAdminProp;
-  const features = userData?.features || {};
-  // Use same DEFAULT_FEATURES logic as App.tsx: false = locked unless explicitly granted
+  // Use getEffectiveFeatures pattern - merge DEFAULT_FEATURES with saved features
+  // This ensures new users with no saved features get correct defaults
+  const DEFAULT_FEATURES = {
+    reminders: true, emailAlerts: true, reports: false,
+    aiChat: false, ocrScanning: false, inviteFriend: false,
+    calendarSync: false, whatsappSms: false,
+  };
+  const features = { ...DEFAULT_FEATURES, ...(userData?.features || {}) };
   const hasReports   = isAdmin || features.reports === true;
-  const hasInvite    = isAdmin || features.inviteFriend !== false;
-  const hasReminders = isAdmin || features.reminders !== false;
+  const hasInvite    = isAdmin || features.inviteFriend === true;
+  const hasReminders = isAdmin || features.reminders === true;
   const [isDesktop, setIsDesktop] = React.useState(typeof window !== 'undefined' && window.innerWidth >= 1024);
 
   React.useEffect(() => {
