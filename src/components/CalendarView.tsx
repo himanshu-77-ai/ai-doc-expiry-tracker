@@ -128,7 +128,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               const matchesDate = d.expiryDate === dateStr;
               if (!matchesDate) return false;
               if (calendarFilter === 'All') return true;
-              return getStatus(d.expiryDate) === calendarFilter;
+              // Renewed docs treated as Safe in calendar filter (consistent with Reminders)
+              const effectiveStatus = d.status === 'Renewed' ? 'Safe' : getStatus(d.expiryDate);
+              return effectiveStatus === calendarFilter;
             });
             const isToday = format(new Date(), "yyyy-MM-dd") === dateStr;
             const isCurrentMonth = date.getMonth() === currentCalendarDate.getMonth();
@@ -155,8 +157,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       onClick={() => setSelectedDoc(d)}
                       className={cn(
                         "text-[10px] p-2 rounded-lg border truncate font-bold cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]",
-                        getStatus(d.expiryDate) === 'Expired' ? "bg-red-50 text-red-700 border-red-100 shadow-sm shadow-red-500/10" :
-                        getStatus(d.expiryDate) === 'Expiring Soon' ? "bg-amber-50 text-amber-700 border-amber-100 shadow-sm shadow-amber-500/10" :
+                        (d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expired') ? "bg-red-50 text-red-700 border-red-100 shadow-sm shadow-red-500/10" :
+                        (d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expiring Soon') ? "bg-amber-50 text-amber-700 border-amber-100 shadow-sm shadow-amber-500/10" :
                         "bg-green-50 text-green-700 border-green-100 shadow-sm shadow-green-500/10"
                       )}
                       title={`${d.title} expires on this date`}
