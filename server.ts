@@ -481,6 +481,7 @@ async function startServer() {
 
   // Debug Route for Firebase
   app.get("/api/debug/firebase", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
     try {
       const saToken = await getServiceAccountToken();
       const { saUniqueId, saEmail } = await getServiceAccountInfo();
@@ -529,6 +530,7 @@ async function startServer() {
 
   // API Routes
   app.get("/api/admin/cron-status", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
     try {
       const saToken = await getServiceAccountToken();
       let tokenInfo = null;
@@ -716,6 +718,8 @@ async function startServer() {
 
   // Razorpay Order Creation
   app.post("/api/payments/create-order", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { amount, currency = "INR" } = req.body; // Default to INR for Razorpay/UPI context
     const rzp = getRazorpay();
     if (!rzp) {
@@ -737,6 +741,8 @@ async function startServer() {
 
   // Stripe Checkout Session
   app.post("/api/payments/create-checkout-session", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { planName, amount, currency = "usd" } = req.body;
     const stripeClient = getStripe();
     
@@ -784,6 +790,7 @@ async function startServer() {
   });
 
   app.post("/api/config/upi", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
     // Only admin can update UPI settings
     const authHeader = req.headers["authorization"] as string;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -843,6 +850,8 @@ async function startServer() {
   // Email Notification Route
   app.post("/api/notifications/send-email", async (req, res) => {
     if (!emailRateLimit(req, res)) return;
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { to, subject, text, html } = req.body;
     // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -861,6 +870,8 @@ async function startServer() {
   // Invite Route — Email via SMTP + WhatsApp via Twilio
   app.post("/api/invites/send", async (req, res) => {
     if (!emailRateLimit(req, res)) return;
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { email, phone, inviteLink, method = "email" } = req.body;
     if (!inviteLink) return res.status(400).json({ error: "Missing inviteLink" });
 
@@ -943,7 +954,10 @@ _AI Tracker — Smart Document Intelligence_`;
 
   // Manual WhatsApp Report
   app.post("/api/notifications/whatsapp-report", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { userId, phone } = req.body;
+    if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
     if (!userId || !phone) return res.status(400).json({ error: "Missing userId or phone" });
     try {
       let docs: any[] = [];
@@ -1327,6 +1341,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Manual Trigger for Testing Scheduled Reports
   app.post("/api/notifications/trigger-reports", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
     try {
       await checkScheduledReports();
     res.json({ success: true, message: "Scheduled reports check triggered" });
@@ -1337,6 +1352,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
     // Test Email
     app.post("/api/notifications/test-email", async (req, res) => {
+      const uid = await verifyUser(req, res);
+      if (!uid) return;
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Missing email" });
       try {
@@ -1365,6 +1382,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       }
 
       // Verify token matches userId to prevent cross-user report access
+      if (!token) return res.status(401).json({ error: "Unauthorized" });
       if (token) {
         try {
           const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
@@ -1468,13 +1486,13 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Update User Profile
   app.post("/api/user/profile", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { userId, displayName, whatsappPhone } = req.body;
-    const authHeader = req.headers.authorization;
-    const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
-
     if (!userId || !displayName) {
       return res.status(400).json({ error: "Missing required fields" });
     }
+    if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
 
     try {
       let success = false;
@@ -1532,12 +1550,11 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   // Update User Report Settings
-  app.post("/api/user/report-settings", async (req, res) => {
+    app.post("/api/user/report-settings", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
-    const authHeader = req.headers.authorization;
-    const userToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
-
-    if (!userId) {
+    if (!userId)
       return res.status(400).json({ error: "Missing userId" });
     }
 
@@ -1680,7 +1697,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Get User Report Settings
   app.get("/api/user/report-settings/:userId", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const { userId } = req.params;
+    if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
     try {
       let userData: any = null;
       if (db) {
@@ -2012,6 +2032,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
   }
 
   app.get("/api/admin/full-health", async (req, res) => {
+    if (!await verifyAdmin(req, res)) return;
     const results: any = {
       timestamp: new Date().toISOString(),
       smtp: "Checking...",
@@ -2286,6 +2307,20 @@ https://ai-doc-expiry-tracker.onrender.com`;
     } catch (e: any) {
       res.status(401).json({ error: "Invalid or expired token" });
       return false;
+    }
+  };
+
+  // Verify any logged-in user — returns decoded token uid or null
+  const verifyUser = async (req: any, res: any): Promise<string | null> => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      return decoded.uid;
+    } catch {
+      res.status(401).json({ error: "Invalid token" });
+      return null;
     }
   };
 
