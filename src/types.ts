@@ -19,4 +19,5 @@ export interface User {
   displayName: string | null;
   photoURL: string | null;
   plan?: string;
+  getIdToken: (forceRefresh?: boolean) => Promise<string>;
 }
