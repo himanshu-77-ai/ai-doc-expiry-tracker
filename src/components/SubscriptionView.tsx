@@ -116,9 +116,13 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
       }
 
       // Default: Razorpay
+      const token = await auth.currentUser?.getIdToken();
       const response = await fetch("/api/payments/create-order", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ amount: inrAmount }),
       });
       
