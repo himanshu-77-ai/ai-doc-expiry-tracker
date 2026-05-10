@@ -503,6 +503,7 @@ My issue: `)}`}
             </div>
           </div>
 
+          {isAdmin && (
           <div className="pt-8 border-t border-gray-100">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -548,6 +549,7 @@ My issue: `)}`}
               </div>
             </div>
           </div>
+          )}
           <div className="pt-8 border-t border-gray-100">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -583,19 +585,12 @@ My issue: `)}`}
                       </td>
                       <td className="px-4 py-3">
                         {(doc.fileUrl || doc.fileData) && (
-                          <button
-                            onClick={() => {
-                              if (doc.fileData) {
-                                // Local base64 — open directly
-                                const win = window.open();
-                                if (win) win.document.write(`<img src="data:image/jpeg;base64,${doc.fileData}" style="max-width:100%" />`);
-                              } else if (doc.fileUrl) {
-                                // Firebase Storage URL — try opening
-                                window.open(doc.fileUrl, '_blank');
-                              }
-                            }}
-                            className="text-blue-600 hover:underline text-sm"
-                          >View</button>
+                          <a
+                            href={doc.fileUrl || `data:image/jpeg;base64,${doc.fileData}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >View</a>
                         )}
                       </td>
                     </tr>
