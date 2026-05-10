@@ -1,104 +1,87 @@
-// Using Groq API - Free tier, no billing required
-// Get your free API key at: https://console.groq.com
+// AI calls are proxied through /api/ai/chat to avoid CORS issues.
+// The server forwards requests to Groq using the server-side GEMINI_API_KEY.
+import { auth } from "./firebase";
 
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const callAI = async (body: object): Promise<any> => {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Not authenticated. Please sign in.");
 
-const getGroqHeaders = () => ({
-  "Content-Type": "application/json",
-  "Authorization": `Bearer ${process.env.GEMINI_API_KEY}` // reusing same env var name so no Render changes needed
-});
+  const response = await fetch("/api/ai/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || err?.error || `AI API error: ${response.status}`);
+  }
+
+  return response.json();
+};
 
 export const extractDocumentInfo = async (base64Image: string, mimeType: string) => {
-  console.log("Starting OCR extraction via Groq...", { mimeType, base64Length: base64Image.length });
+  console.log("Starting OCR extraction via server proxy...", { mimeType, base64Length: base64Image.length });
 
   try {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("API Key is missing. Please check your configuration.");
-    console.log("API Key loaded, starts with:", key.substring(0, 8));
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 40000);
-
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: getGroqHeaders(),
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: "meta-llama/llama-4-scout-17b-16e-instruct",
-        messages: [
-          {
-            role: "user",
-            content: [
+    const data = await callAI({
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Analyze this document image carefully and extract the following fields.
+              CRITICAL: Read ALL digits in dates very carefully. If a year shows "2036" return 2036 NOT 2026. Read each digit precisely.
+              Return ONLY a valid JSON object with no extra text, no markdown:
               {
-                type: "text",
-                text: `Analyze this document image carefully and extract the following fields.
-                CRITICAL: Read ALL digits in dates very carefully. If a year shows "2036" return 2036 NOT 2026. Read each digit precisely - do not confuse similar-looking digits.
-                Return ONLY a valid JSON object with no extra text, no markdown:
-                {
-                  "title": "short document name",
-                  "expiryDate": "YYYY-MM-DD or null",
-                  "issueDate": "YYYY-MM-DD or null",
-                  "documentNumber": "document number or null",
-                  "category": "one of: Identity, License, Insurance, Invoice, Other",
-                  "summary": "one sentence summary"
-                }
-                Double-check every year digit before returning.`
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${mimeType};base64,${base64Image}`
-                }
+                "title": "short document name",
+                "expiryDate": "YYYY-MM-DD or null",
+                "issueDate": "YYYY-MM-DD or null",
+                "documentNumber": "document number or null",
+                "category": "one of: Identity, License, Insurance, Invoice, Other",
+                "summary": "one sentence summary"
               }
-            ]
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.1
-      })
+              Double-check every year digit before returning.`
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mimeType};base64,${base64Image}`
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 500,
+      temperature: 0.1
     });
 
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err?.error?.message || "Groq API error");
-    }
-
-    const data = await response.json();
     const text = data.choices?.[0]?.message?.content;
     if (!text) throw new Error("Empty response from AI.");
 
-    // Clean and parse JSON
     const clean = text.replace(/```json|```/g, "").trim();
     const info = JSON.parse(clean);
 
-    // ── POST-PROCESSING: Validate and correct dates ──────────────────────────
     const currentYear = new Date().getFullYear();
     const fixDate = (dateStr: string | null): string | null => {
       if (!dateStr) return null;
-      // Accept YYYY-MM-DD format
       const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (!match) return dateStr;
-      let year = parseInt(match[1]);
+      const year = parseInt(match[1]);
       const month = match[2];
       const day = match[3];
-      // If year looks like a typo (e.g. 2026 when doc clearly shows 2036),
-      // we can't auto-correct, but we flag implausible past expiry years
-      // Rule: expiry year should be >= currentYear - 5 (not expired more than 5 years ago)
-      // and <= currentYear + 50 (not more than 50 years in future)
-      if (year < currentYear - 5) {
-        console.warn(`[OCR] Suspicious past expiry year: ${year}. Keeping as-is — verify manually.`);
-      }
-      if (year > currentYear + 50) {
-        console.warn(`[OCR] Suspicious future expiry year: ${year}. Keeping as-is — verify manually.`);
-      }
+      if (year < currentYear - 5) console.warn(`[OCR] Suspicious past expiry year: ${year}. Verify manually.`);
+      if (year > currentYear + 50) console.warn(`[OCR] Suspicious future expiry year: ${year}. Verify manually.`);
       return `${year}-${month}-${day}`;
     };
 
     if (info.expiryDate) info.expiryDate = fixDate(info.expiryDate);
     if (info.issueDate) info.issueDate = fixDate(info.issueDate);
-    // ─────────────────────────────────────────────────────────────────────────
 
     console.log("AI Extraction success:", info);
     return info;
@@ -114,9 +97,6 @@ export const chatWithAssistant = async (
   message: string,
   documentsContext?: string
 ) => {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return "AI Assistant is currently unavailable (Missing API Key).";
-
   const systemPrompt = `You are AI Tracker Assistant, a high-end personal document management expert.
 Your goal is to help users manage their documents, track expiries, and provide clear summaries of their document health.
 
@@ -134,27 +114,17 @@ ${documentsContext ? `CONTEXT - USER'S CURRENT DOCUMENTS:\n${documentsContext}` 
       content: msg.text
     }));
 
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: getGroqHeaders(),
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...chatHistory,
-          { role: "user", content: message }
-        ],
-        max_tokens: 1000,
-        temperature: 0.7
-      })
+    const data = await callAI({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...chatHistory,
+        { role: "user", content: message }
+      ],
+      max_tokens: 1000,
+      temperature: 0.7
     });
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err?.error?.message || "Groq API error");
-    }
-
-    const data = await response.json();
     return data.choices?.[0]?.message?.content || "I'm sorry, I couldn't generate a helpful response.";
 
   } catch (error: any) {
