@@ -1443,7 +1443,7 @@ Track your document expiry dates with AI.
               });
 
               const timeoutPromise = new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new Error("Storage Timeout")), 45000)
+                setTimeout(() => reject(new Error("Storage Timeout")), 8000)
               );
 
               try {
