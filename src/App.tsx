@@ -246,12 +246,11 @@ export default function App() {
     if (!user) return;
     setIsSavingSettings(true);
     try {
-      const token = await user.getIdToken();
       const response = await fetch("/api/user/report-settings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Authorization": `Bearer ${await user.getIdToken()}`
         },
         body: JSON.stringify({
           userId: user.uid,
@@ -260,16 +259,13 @@ export default function App() {
         })
       });
       if (response.ok) {
-        alert("Report schedule updated successfully! ✅");
+        alert("Report schedule updated successfully!");
       } else {
-        const data = await response.json().catch(() => ({}));
-        const msg = data.details || data.error || `Server error (${response.status})`;
-        console.error("Save settings failed:", msg);
-        alert(`Failed to save schedule: ${msg}`);
+        alert("Failed to update schedule.");
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Save settings error:", err);
-      alert(`Network error: ${err.message || "Could not connect to server"}`);
+      alert("Error saving report schedule.");
     } finally {
       setIsSavingSettings(false);
     }
@@ -748,32 +744,17 @@ export default function App() {
       const soonDocs = documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expiring Soon');
       const expiredDocs = documents.filter(d => d.status !== 'Renewed' && getStatus(d.expiryDate) === 'Expired');
 
-      // Build clean, unambiguous context for AI — no truncation confusion
-      let docsContext = `DOCUMENT HEALTH SUMMARY\n`;
-      docsContext += `Total documents: ${documents.length}\n`;
-      docsContext += `Expired: ${expiredDocs.length} | Expiring Soon: ${soonDocs.length} | Safe/Renewed: ${safeDocs.length}\n`;
-      docsContext += `NOTE: All counts above are exact and complete. Lists below show ALL documents.\n\n`;
-      docsContext += `Expiry warning interval set by user: ${expiryInterval ?? 30} days\n\n`;
-
+      let docsContext = `--- ASSET HEALTH REPORT ---\n`;
+      docsContext += `Summary: ${documents.length} objects total. ${expiredDocs.length} critical, ${soonDocs.length} at risk, ${safeDocs.length} secure.\n\n`;
+      
       if (expiredDocs.length > 0) {
-        docsContext += `EXPIRED DOCUMENTS (${expiredDocs.length} total):\n`;
-        docsContext += expiredDocs.map(d => `- ${d.title} | Category: ${d.category} | Expired: ${d.expiryDate}`).join("\n") + "\n\n";
-      } else {
-        docsContext += "EXPIRED DOCUMENTS: None\n\n";
+        docsContext += "CRITICAL EXPIRY LIST:\n" + expiredDocs.slice(0, 10).map(d => `- ${d.title} (Expired: ${d.expiryDate})`).join("\n") + (expiredDocs.length > 10 ? "\n... and others" : "") + "\n\n";
       }
-
       if (soonDocs.length > 0) {
-        docsContext += `EXPIRING SOON (${soonDocs.length} total — within ${expiryInterval ?? 30} days):\n`;
-        docsContext += soonDocs.map(d => `- ${d.title} | Category: ${d.category} | Expires: ${d.expiryDate}`).join("\n") + "\n\n";
-      } else {
-        docsContext += "EXPIRING SOON: None\n\n";
+        docsContext += "AT-RISK LIST (Expiring Soon):\n" + soonDocs.slice(0, 10).map(d => `- ${d.title} (Expires: ${d.expiryDate})`).join("\n") + (soonDocs.length > 10 ? "\n... and others" : "") + "\n\n";
       }
-
       if (safeDocs.length > 0) {
-        docsContext += `SAFE DOCUMENTS (${safeDocs.length} total):\n`;
-        docsContext += safeDocs.map(d => `- ${d.title} | Category: ${d.category} | Valid until: ${d.expiryDate}${d.status === 'Renewed' ? ' [RENEWED]' : ''}`).join("\n") + "\n\n";
-      } else {
-        docsContext += "SAFE DOCUMENTS: None\n\n";
+        docsContext += `SECURE LIST (showing up to 10 of ${safeDocs.length} total \u2014 counts in Summary are accurate):\n` + safeDocs.slice(0, 10).map(d => `- ${d.title} (Valid: ${d.expiryDate})`).join("\n") + (safeDocs.length > 10 ? `\n... and ${safeDocs.length - 10} more secure items.` : "") + "\n\n";
       }
 
       console.log("Chat Context Prep:", docsContext);
