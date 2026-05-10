@@ -190,7 +190,35 @@ function buildWhatsAppReport(docs: any[], interval: number = 30, title: string =
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3000", 10);
+
+  // ═══════════════════════════════════════════════════════════════
+  // AUTH HELPERS — hoisted before all routes (const is NOT hoisted)
+  // ═══════════════════════════════════════════════════════════════
+  const ADMIN_UID = process.env.ADMIN_UID;
+  if (!ADMIN_UID) console.error("[Admin] ADMIN_UID env var not set — admin routes disabled.");
+
+  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
+    if (!ADMIN_UID) { res.status(503).json({ error: "Admin not configured" }); return false; }
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) { res.status(401).json({ error: "Missing authorization token" }); return false; }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      if (decoded.uid !== ADMIN_UID) { res.status(403).json({ error: "Unauthorized: not admin" }); return false; }
+      return true;
+    } catch { res.status(401).json({ error: "Invalid or expired token" }); return false; }
+  };
+
+  const verifyUser = async (req: any, res: any): Promise<string | null> => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      return decoded.uid;
+    } catch { res.status(401).json({ error: "Invalid token" }); return null; }
+  };
 
   let projectId = "";
   let configProjectId = "";
@@ -564,8 +592,8 @@ app.use((req: any, res: any, next: any) => {
       const saToken = await getServiceAccountToken();
       let tokenInfo = null;
       if (saToken) {
-        const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
-        tokenInfo = await res.json();
+        const tokenRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
+        tokenInfo = await tokenRes.json();
       }
 
       const { saUniqueId, saEmail } = await getServiceAccountInfo();
@@ -1058,9 +1086,9 @@ _AI Tracker — Smart Document Intelligence_`;
       const saToken = await getServiceAccountToken();
       if (!saToken) return { saUniqueId: null, saEmail: null };
 
-      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
-      if (res.ok) {
-        const data: any = await res.json();
+      const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
+      if (tokenInfoRes.ok) {
+        const data: any = await tokenInfoRes.json();
         // For service accounts, 'sub', 'user_id', 'azp', or 'aud' can contain the numeric unique ID
         return { 
           saUniqueId: data.sub || data.user_id || data.azp || data.aud || null, 
@@ -1566,7 +1594,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
         try {
           const profileUpdate: any = {
             displayName,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            updatedAt: new Date().toISOString()
           };
           if (whatsappPhone !== undefined) profileUpdate.whatsappPhone = whatsappPhone;
           await db.collection("users").doc(userId).set(profileUpdate, { merge: true });
@@ -1616,12 +1644,13 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   // Update User Report Settings
-    app.post("/api/user/report-settings", async (req, res) => {
+  app.post("/api/user/report-settings", async (req, res) => {
     if (!apiRateLimit(req, res)) return;
-        const uid = await verifyUser(req, res);
+    const uid = await verifyUser(req, res);
     if (!uid) return;
-    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
-    if (!userId) return res.status(400).json({ error: "Missing userId" });
+    const { userId: bodyUserId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
+    // userId optional in body — fall back to verified token uid
+    const userId = bodyUserId || uid;
     if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
 
     try {
@@ -1629,16 +1658,16 @@ https://ai-doc-expiry-tracker.onrender.com`;
       if (db) {
         try {
           const updateData: any = {
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            updatedAt: new Date().toISOString()  // plain ISO — serverTimestamp() can crash on permission errors
           };
-          if (frequency && time) updateData.reportSettings = { frequency, time, lastSent: null };
-          if (expiryInterval) updateData.expiryInterval = expiryInterval.toString();
+          if (frequency !== undefined && time !== undefined) updateData.reportSettings = { frequency, time, lastSent: null };
+          if (expiryInterval !== undefined && expiryInterval !== null) updateData.expiryInterval = expiryInterval.toString();
           if (displayName) updateData.displayName = displayName;
           if (photoURL) updateData.photoURL = photoURL;
           if (whatsappPhone || phone) updateData.whatsappPhone = whatsappPhone || phone;
           if (waFreq !== undefined) updateData.waReportFreq = waFreq;
           if (waTime !== undefined) updateData.waReportTime = waTime;
-          if (emailAlerts !== undefined) updateData["features.emailAlerts"] = emailAlerts;
+          if (emailAlerts !== undefined) updateData.features = { emailAlerts };
 
           await db.collection("users").doc(userId).set(updateData, { merge: true });
           success = true;
@@ -1650,107 +1679,81 @@ https://ai-doc-expiry-tracker.onrender.com`;
       if (!success) {
         // REST fallback for setting user preferences
         const saToken = await getServiceAccountToken();
-        const effectiveToken = saToken;
-        
-        const updateData: any = {
-          fields: {}
-        };
-        if (frequency && time) {
+        const rawAuthHeader2 = req.headers["authorization"] as string;
+        const bearerToken2 = rawAuthHeader2?.startsWith("Bearer ") ? rawAuthHeader2.slice(7) : null;
+        const effectiveToken = bearerToken2 || saToken;
+        const currentApiKey = getFirebaseConfig().apiKey || apiKey;
+
+        const updateData: any = { fields: {} };
+        if (frequency !== undefined && time !== undefined) {
           updateData.fields.reportSettings = {
-            mapValue: {
-              fields: {
-                frequency: { stringValue: frequency },
-                time: { stringValue: time },
-                lastSent: { nullValue: null }
-              }
-            }
+            mapValue: { fields: {
+              frequency: { stringValue: frequency },
+              time: { stringValue: time },
+              lastSent: { nullValue: null }
+            }}
           };
         }
-        if (expiryInterval) updateData.fields.expiryInterval = { stringValue: expiryInterval.toString() };
+        if (expiryInterval !== undefined && expiryInterval !== null) updateData.fields.expiryInterval = { stringValue: expiryInterval.toString() };
         if (displayName) updateData.fields.displayName = { stringValue: displayName };
         if (photoURL) updateData.fields.photoURL = { stringValue: photoURL };
+        if (whatsappPhone || phone) updateData.fields.whatsappPhone = { stringValue: whatsappPhone || phone };
+        if (waFreq !== undefined) updateData.fields.waReportFreq = { stringValue: waFreq };
+        if (waTime !== undefined) updateData.fields.waReportTime = { stringValue: waTime };
         updateData.fields.updatedAt = { timestampValue: new Date().toISOString() };
 
         const tryUpdate = async (dbId: string) => {
           const encodedUserId = encodeURIComponent(userId);
-          const currentProjectId = projectId; 
+          const currentProjectId = projectId;
           const baseUrl = `https://firestore.googleapis.com/v1/projects/${currentProjectId}/databases/${dbId}/documents/users/${encodedUserId}`;
-          
+
           const performRequest = async (useToken: boolean, useUpdateMask: boolean) => {
             const headers: any = { "Content-Type": "application/json" };
             let url = baseUrl;
-            
             if (useToken && effectiveToken) {
               headers["Authorization"] = `Bearer ${effectiveToken}`;
             } else {
-              url += `${url.includes('?') ? '&' : '?'}key=${apiKey}`;
+              url += `${url.includes('?') ? '&' : '?'}key=${currentApiKey}`;
             }
-            
             if (useUpdateMask) {
-              const maskFields = [];
-              if (frequency && time) maskFields.push("reportSettings");
-              if (expiryInterval) maskFields.push("expiryInterval");
+              const maskFields: string[] = [];
+              if (frequency !== undefined && time !== undefined) maskFields.push("reportSettings");
+              if (expiryInterval !== undefined && expiryInterval !== null) maskFields.push("expiryInterval");
               if (displayName) maskFields.push("displayName");
               if (photoURL) maskFields.push("photoURL");
+              if (whatsappPhone || phone) maskFields.push("whatsappPhone");
+              if (waFreq !== undefined) maskFields.push("waReportFreq");
+              if (waTime !== undefined) maskFields.push("waReportTime");
               maskFields.push("updatedAt");
               url += `${url.includes('?') ? '&' : '?'}updateMask.fieldPaths=${maskFields.join('&updateMask.fieldPaths=')}`;
             }
-            
-            return await fetch(url, {
-              method: "PATCH",
-              headers,
-              body: JSON.stringify(updateData)
-            });
+            return await fetch(url, { method: "PATCH", headers, body: JSON.stringify(updateData) });
           };
 
-          console.log(`[Report Settings] Attempting REST PATCH to ${dbId} for user ${userId} (Token: ${effectiveToken ? 'SA' : 'None'})`);
-          
-          // 1. Try with token and updateMask
-          let res = await performRequest(true, true);
-
-          // 2. Fallback to API Key if Token failed with 403 or 401
-          if (!res.ok && (res.status === 403 || res.status === 401) && effectiveToken) {
-            console.info(`[Report Settings] REST PATCH Auth Error (${res.status}), falling back to API Key for ${dbId}`);
-            res = await performRequest(false, true);
+          console.log(`[Report Settings] REST PATCH to ${dbId} for ${userId} (Token: ${effectiveToken ? (bearerToken2 ? 'User' : 'SA') : 'None'})`);
+          let fetchRes = await performRequest(true, true);
+          if (!fetchRes.ok && (fetchRes.status === 403 || fetchRes.status === 401) && effectiveToken) {
+            fetchRes = await performRequest(false, true);
           }
-
-          // 3. If 404, the document doesn't exist. Create it.
-          if (res.status === 404) {
-            console.log(`[Report Settings] Document not found, creating new user document for ${userId}`);
-            // Try create with token first
-            res = await performRequest(true, false);
-            
-            // Fallback to API Key if Token failed with 403 or 401 on create
-            if (!res.ok && (res.status === 403 || res.status === 401) && effectiveToken) {
-              console.info(`[Report Settings] REST CREATE Auth Error (${res.status}), falling back to API Key for ${dbId}`);
-              res = await performRequest(false, false);
+          if (fetchRes.status === 404) {
+            fetchRes = await performRequest(true, false);
+            if (!fetchRes.ok && (fetchRes.status === 403 || fetchRes.status === 401) && effectiveToken) {
+              fetchRes = await performRequest(false, false);
             }
           }
-          
-          if (!res.ok) {
-            const errBody = await res.text();
-            console.error(`[Report Settings] REST Update failed for ${dbId}: ${res.status} - ${errBody}`);
+          if (!fetchRes.ok) {
+            const errBody = await fetchRes.text();
+            console.error(`[Report Settings] REST failed for ${dbId}: ${fetchRes.status} - ${errBody}`);
           }
-          
-          return res;
+          return fetchRes;
         };
 
         let restRes = await tryUpdate(databaseId);
-
         if (!restRes.ok && (restRes.status === 404 || restRes.status === 403) && databaseId !== "(default)") {
-          console.warn(`[Report Settings] Update failed on ${databaseId} (Status: ${restRes.status}), trying (default)...`);
           restRes = await tryUpdate("(default)");
         }
-
         if (!restRes.ok) {
           const errText = await restRes.text();
-          console.error(`[Report Settings] REST Update failed: ${restRes.status}`, errText);
-          
-          // If 404, it might be the project ID or database ID.
-          if (restRes.status === 404) {
-            console.error(`[Report Settings] 404 Error Detail: Please verify Project ID [${projectId}] and Database ID [${databaseId}]`);
-          }
-          
           throw new Error(`REST Update failed: ${restRes.status} - ${errText}`);
         }
       }
@@ -2356,49 +2359,6 @@ https://ai-doc-expiry-tracker.onrender.com`;
   // ═══════════════════════════════════════════════════════════════
   // ADMIN ROUTES — Only accessible by ADMIN_UID
   // ═══════════════════════════════════════════════════════════════
-  const ADMIN_UID = process.env.ADMIN_UID;
-  if (!ADMIN_UID) {
-    console.error("[Admin] ADMIN_UID env var not set — admin routes will be disabled.");
-  }
-
-  // Secure server-side admin check using Firebase ID token
-  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
-    if (!ADMIN_UID) {
-      res.status(503).json({ error: "Admin not configured" });
-      return false;
-    }
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) {
-      res.status(401).json({ error: "Missing authorization token" });
-      return false;
-    }
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      if (decoded.uid !== ADMIN_UID) {
-        res.status(403).json({ error: "Unauthorized: not admin" });
-        return false;
-      }
-      return true;
-    } catch (e: any) {
-      res.status(401).json({ error: "Invalid or expired token" });
-      return false;
-    }
-  };
-
-  // Verify any logged-in user — returns decoded token uid or null
-  const verifyUser = async (req: any, res: any): Promise<string | null> => {
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      return decoded.uid;
-    } catch {
-      res.status(401).json({ error: "Invalid token" });
-      return null;
-    }
-  };
 
   // GET all users
   app.get("/api/admin/users", async (req, res) => {
