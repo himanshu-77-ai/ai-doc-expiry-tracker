@@ -190,35 +190,7 @@ function buildWhatsAppReport(docs: any[], interval: number = 30, title: string =
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || "3000", 10);
-
-  // ═══════════════════════════════════════════════════════════════
-  // AUTH HELPERS — hoisted before all routes (const is NOT hoisted)
-  // ═══════════════════════════════════════════════════════════════
-  const ADMIN_UID = process.env.ADMIN_UID;
-  if (!ADMIN_UID) console.error("[Admin] ADMIN_UID env var not set — admin routes disabled.");
-
-  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
-    if (!ADMIN_UID) { res.status(503).json({ error: "Admin not configured" }); return false; }
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) { res.status(401).json({ error: "Missing authorization token" }); return false; }
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      if (decoded.uid !== ADMIN_UID) { res.status(403).json({ error: "Unauthorized: not admin" }); return false; }
-      return true;
-    } catch { res.status(401).json({ error: "Invalid or expired token" }); return false; }
-  };
-
-  const verifyUser = async (req: any, res: any): Promise<string | null> => {
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      return decoded.uid;
-    } catch { res.status(401).json({ error: "Invalid token" }); return null; }
-  };
+  const PORT = 3000;
 
   let projectId = "";
   let configProjectId = "";
@@ -455,35 +427,6 @@ async function startServer() {
 
   app.use(express.json());
 
-// Security Headers (Helmet equivalent — no extra package needed)
-app.use((req: any, res: any, next: any) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  res.setHeader("Content-Security-Policy", 
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://api.anthropic.com https://generativelanguage.googleapis.com");
-  next();
-});
-
-// CORS — only allow our own domain
-app.use((req: any, res: any, next: any) => {
-  const allowed = [
-    "https://ai-doc-expiry-tracker.onrender.com",
-    "http://localhost:5173",
-    "http://localhost:3000"
-  ];
-  const origin = req.headers.origin as string;
-  if (origin && allowed.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
-});
-
   // ── KEEP-ALIVE & HEALTH (cron-job.org) ──────────────────────────────────
   // Keep Alive job:  GET  /api/health        every 10 min
   // Reminders job:   POST /api/ping/reminders daily 9 AM
@@ -592,8 +535,8 @@ app.use((req: any, res: any, next: any) => {
       const saToken = await getServiceAccountToken();
       let tokenInfo = null;
       if (saToken) {
-        const tokenRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
-        tokenInfo = await tokenRes.json();
+        const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
+        tokenInfo = await res.json();
       }
 
       const { saUniqueId, saEmail } = await getServiceAccountInfo();
@@ -775,23 +718,18 @@ app.use((req: any, res: any, next: any) => {
 
   // Razorpay Order Creation
   app.post("/api/payments/create-order", async (req, res) => {
-    if (!apiRateLimit(req, res)) return;
-        const uid = await verifyUser(req, res);
+    const uid = await verifyUser(req, res);
     if (!uid) return;
-    const { plan, currency = "INR" } = req.body;
-    // Server-side price enforcement — never trust client-sent amount
-    const PLAN_PRICES: Record<string, number> = { monthly: 49900, yearly: 45900 * 12 };
-    const serverAmount = PLAN_PRICES[plan?.toLowerCase()] || PLAN_PRICES.monthly;
+    const { amount, currency = "INR" } = req.body; // Default to INR for Razorpay/UPI context
     const rzp = getRazorpay();
     if (!rzp) {
       return res.status(500).json({ error: "Razorpay is not configured on the server." });
     }
     try {
       const options = {
-        amount: serverAmount, // paise — hardcoded server-side
+        amount: amount * 100, // amount in the smallest currency unit
         currency,
         receipt: `receipt_${Date.now()}`,
-        notes: { plan: plan?.toLowerCase() || "monthly", userId: uid },
       };
       const order = await rzp.orders.create(options);
       res.json(order);
@@ -891,26 +829,6 @@ app.use((req: any, res: any, next: any) => {
 
   // Simple in-memory rate limiter (no extra package needed)
   const emailRateMap = new Map<string, { count: number; resetAt: number }>();
-
-  // Generic API rate limiter — 30 requests per minute per IP
-  const apiRateMap = new Map<string, { count: number; resetAt: number }>();
-  function apiRateLimit(req: any, res: any): boolean {
-    const ip = req.ip || req.connection?.remoteAddress || "unknown";
-    const now = Date.now();
-    const window = 60 * 1000; // 1 minute
-    const max = 30;
-    const entry = apiRateMap.get(ip);
-    if (!entry || now > entry.resetAt) {
-      apiRateMap.set(ip, { count: 1, resetAt: now + window });
-      return true;
-    }
-    if (entry.count >= max) {
-      res.status(429).json({ error: "Too many requests. Please slow down." });
-      return false;
-    }
-    entry.count++;
-    return true;
-  }
   function emailRateLimit(req: any, res: any): boolean {
     const ip = req.ip || req.connection.remoteAddress || "unknown";
     const now = Date.now();
@@ -956,11 +874,6 @@ app.use((req: any, res: any, next: any) => {
     if (!uid) return;
     const { email, phone, inviteLink, method = "email" } = req.body;
     if (!inviteLink) return res.status(400).json({ error: "Missing inviteLink" });
-    // Validate inviteLink is a safe URL (prevent XSS/injection in email HTML)
-    const allowedBase = process.env.APP_URL || "https://ai-doc-expiry-tracker.onrender.com";
-    if (!inviteLink.startsWith(allowedBase) && !inviteLink.startsWith("http://localhost")) {
-      return res.status(400).json({ error: "Invalid invite link" });
-    }
 
     try {
       if (method === "whatsapp" || method === "both") {
@@ -1086,9 +999,9 @@ _AI Tracker — Smart Document Intelligence_`;
       const saToken = await getServiceAccountToken();
       if (!saToken) return { saUniqueId: null, saEmail: null };
 
-      const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
-      if (tokenInfoRes.ok) {
-        const data: any = await tokenInfoRes.json();
+      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${saToken}`);
+      if (res.ok) {
+        const data: any = await res.json();
         // For service accounts, 'sub', 'user_id', 'azp', or 'aud' can contain the numeric unique ID
         return { 
           saUniqueId: data.sub || data.user_id || data.azp || data.aud || null, 
@@ -1573,8 +1486,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Update User Profile
   app.post("/api/user/profile", async (req, res) => {
-    if (!apiRateLimit(req, res)) return;
-        const uid = await verifyUser(req, res);
+    const uid = await verifyUser(req, res);
     if (!uid) return;
     const { userId, displayName, whatsappPhone } = req.body;
     if (!userId || !displayName) {
@@ -1582,19 +1494,13 @@ https://ai-doc-expiry-tracker.onrender.com`;
     }
     if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
 
-    // Input validation
-    if (displayName.length > 100) return res.status(400).json({ error: "Display name too long" });
-    if (whatsappPhone && !/^\+?[0-9]{7,15}$/.test(whatsappPhone.replace(/\s/g,''))) {
-      return res.status(400).json({ error: "Invalid WhatsApp number format" });
-    }
-
     try {
       let success = false;
       if (db) {
         try {
           const profileUpdate: any = {
             displayName,
-            updatedAt: new Date().toISOString()
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
           };
           if (whatsappPhone !== undefined) profileUpdate.whatsappPhone = whatsappPhone;
           await db.collection("users").doc(userId).set(profileUpdate, { merge: true });
@@ -1606,7 +1512,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       if (!success) {
         const saToken = await getServiceAccountToken();
-        const effectiveToken = saToken;
+        const effectiveToken = userToken || saToken;
         const updateData = {
           fields: {
             displayName: { stringValue: displayName },
@@ -1644,24 +1550,23 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   // Update User Report Settings
-  app.post("/api/user/report-settings", async (req, res) => {
-    if (!apiRateLimit(req, res)) return;
+    app.post("/api/user/report-settings", async (req, res) => {
     const uid = await verifyUser(req, res);
     if (!uid) return;
-    const { userId: bodyUserId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
-    // userId optional in body — fall back to verified token uid
-    const userId = bodyUserId || uid;
-    if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
+    const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
+    if (!userId)
+      return res.status(400).json({ error: "Missing userId" });
+    }
 
     try {
       let success = false;
       if (db) {
         try {
           const updateData: any = {
-            updatedAt: new Date().toISOString()  // plain ISO — serverTimestamp() can crash on permission errors
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
           };
-          if (frequency !== undefined && time !== undefined) updateData.reportSettings = { frequency, time, lastSent: null };
-          if (expiryInterval !== undefined && expiryInterval !== null) updateData.expiryInterval = expiryInterval.toString();
+          if (frequency && time) updateData.reportSettings = { frequency, time, lastSent: null };
+          if (expiryInterval) updateData.expiryInterval = expiryInterval.toString();
           if (displayName) updateData.displayName = displayName;
           if (photoURL) updateData.photoURL = photoURL;
           if (whatsappPhone || phone) updateData.whatsappPhone = whatsappPhone || phone;
@@ -1679,81 +1584,107 @@ https://ai-doc-expiry-tracker.onrender.com`;
       if (!success) {
         // REST fallback for setting user preferences
         const saToken = await getServiceAccountToken();
-        const rawAuthHeader2 = req.headers["authorization"] as string;
-        const bearerToken2 = rawAuthHeader2?.startsWith("Bearer ") ? rawAuthHeader2.slice(7) : null;
-        const effectiveToken = bearerToken2 || saToken;
-        const currentApiKey = getFirebaseConfig().apiKey || apiKey;
-
-        const updateData: any = { fields: {} };
-        if (frequency !== undefined && time !== undefined) {
+        const effectiveToken = userToken || saToken;
+        
+        const updateData: any = {
+          fields: {}
+        };
+        if (frequency && time) {
           updateData.fields.reportSettings = {
-            mapValue: { fields: {
-              frequency: { stringValue: frequency },
-              time: { stringValue: time },
-              lastSent: { nullValue: null }
-            }}
+            mapValue: {
+              fields: {
+                frequency: { stringValue: frequency },
+                time: { stringValue: time },
+                lastSent: { nullValue: null }
+              }
+            }
           };
         }
-        if (expiryInterval !== undefined && expiryInterval !== null) updateData.fields.expiryInterval = { stringValue: expiryInterval.toString() };
+        if (expiryInterval) updateData.fields.expiryInterval = { stringValue: expiryInterval.toString() };
         if (displayName) updateData.fields.displayName = { stringValue: displayName };
         if (photoURL) updateData.fields.photoURL = { stringValue: photoURL };
-        if (whatsappPhone || phone) updateData.fields.whatsappPhone = { stringValue: whatsappPhone || phone };
-        if (waFreq !== undefined) updateData.fields.waReportFreq = { stringValue: waFreq };
-        if (waTime !== undefined) updateData.fields.waReportTime = { stringValue: waTime };
         updateData.fields.updatedAt = { timestampValue: new Date().toISOString() };
 
         const tryUpdate = async (dbId: string) => {
           const encodedUserId = encodeURIComponent(userId);
-          const currentProjectId = projectId;
+          const currentProjectId = projectId; 
           const baseUrl = `https://firestore.googleapis.com/v1/projects/${currentProjectId}/databases/${dbId}/documents/users/${encodedUserId}`;
-
+          
           const performRequest = async (useToken: boolean, useUpdateMask: boolean) => {
             const headers: any = { "Content-Type": "application/json" };
             let url = baseUrl;
+            
             if (useToken && effectiveToken) {
               headers["Authorization"] = `Bearer ${effectiveToken}`;
             } else {
-              url += `${url.includes('?') ? '&' : '?'}key=${currentApiKey}`;
+              url += `${url.includes('?') ? '&' : '?'}key=${apiKey}`;
             }
+            
             if (useUpdateMask) {
-              const maskFields: string[] = [];
-              if (frequency !== undefined && time !== undefined) maskFields.push("reportSettings");
-              if (expiryInterval !== undefined && expiryInterval !== null) maskFields.push("expiryInterval");
+              const maskFields = [];
+              if (frequency && time) maskFields.push("reportSettings");
+              if (expiryInterval) maskFields.push("expiryInterval");
               if (displayName) maskFields.push("displayName");
               if (photoURL) maskFields.push("photoURL");
-              if (whatsappPhone || phone) maskFields.push("whatsappPhone");
-              if (waFreq !== undefined) maskFields.push("waReportFreq");
-              if (waTime !== undefined) maskFields.push("waReportTime");
               maskFields.push("updatedAt");
               url += `${url.includes('?') ? '&' : '?'}updateMask.fieldPaths=${maskFields.join('&updateMask.fieldPaths=')}`;
             }
-            return await fetch(url, { method: "PATCH", headers, body: JSON.stringify(updateData) });
+            
+            return await fetch(url, {
+              method: "PATCH",
+              headers,
+              body: JSON.stringify(updateData)
+            });
           };
 
-          console.log(`[Report Settings] REST PATCH to ${dbId} for ${userId} (Token: ${effectiveToken ? (bearerToken2 ? 'User' : 'SA') : 'None'})`);
-          let fetchRes = await performRequest(true, true);
-          if (!fetchRes.ok && (fetchRes.status === 403 || fetchRes.status === 401) && effectiveToken) {
-            fetchRes = await performRequest(false, true);
+          console.log(`[Report Settings] Attempting REST PATCH to ${dbId} for user ${userId} (Token: ${effectiveToken ? (userToken ? 'User' : 'SA') : 'None'})`);
+          
+          // 1. Try with token and updateMask
+          let res = await performRequest(true, true);
+
+          // 2. Fallback to API Key if Token failed with 403 or 401
+          if (!res.ok && (res.status === 403 || res.status === 401) && effectiveToken) {
+            console.info(`[Report Settings] REST PATCH Auth Error (${res.status}), falling back to API Key for ${dbId}`);
+            res = await performRequest(false, true);
           }
-          if (fetchRes.status === 404) {
-            fetchRes = await performRequest(true, false);
-            if (!fetchRes.ok && (fetchRes.status === 403 || fetchRes.status === 401) && effectiveToken) {
-              fetchRes = await performRequest(false, false);
+
+          // 3. If 404, the document doesn't exist. Create it.
+          if (res.status === 404) {
+            console.log(`[Report Settings] Document not found, creating new user document for ${userId}`);
+            // Try create with token first
+            res = await performRequest(true, false);
+            
+            // Fallback to API Key if Token failed with 403 or 401 on create
+            if (!res.ok && (res.status === 403 || res.status === 401) && effectiveToken) {
+              console.info(`[Report Settings] REST CREATE Auth Error (${res.status}), falling back to API Key for ${dbId}`);
+              res = await performRequest(false, false);
             }
           }
-          if (!fetchRes.ok) {
-            const errBody = await fetchRes.text();
-            console.error(`[Report Settings] REST failed for ${dbId}: ${fetchRes.status} - ${errBody}`);
+          
+          if (!res.ok) {
+            const errBody = await res.text();
+            console.error(`[Report Settings] REST Update failed for ${dbId}: ${res.status} - ${errBody}`);
           }
-          return fetchRes;
+          
+          return res;
         };
 
         let restRes = await tryUpdate(databaseId);
+
         if (!restRes.ok && (restRes.status === 404 || restRes.status === 403) && databaseId !== "(default)") {
+          console.warn(`[Report Settings] Update failed on ${databaseId} (Status: ${restRes.status}), trying (default)...`);
           restRes = await tryUpdate("(default)");
         }
+
         if (!restRes.ok) {
           const errText = await restRes.text();
+          console.error(`[Report Settings] REST Update failed: ${restRes.status}`, errText);
+          
+          // If 404, it might be the project ID or database ID.
+          if (restRes.status === 404) {
+            console.error(`[Report Settings] 404 Error Detail: Please verify Project ID [${projectId}] and Database ID [${databaseId}]`);
+          }
+          
           throw new Error(`REST Update failed: ${restRes.status} - ${errText}`);
         }
       }
@@ -2072,13 +2003,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
   // Helper to update user plan
   async function updateUserPlan(userId: string, plan: string) {
-    // Normalize + whitelist plan — never allow arbitrary plan values
+    // Normalize plan to lowercase to match PLAN_CONFIG keys: "free" | "monthly" | "yearly"
     plan = plan.toLowerCase().trim();
-    const VALID_PLANS = ["free", "monthly", "yearly"];
-    if (!VALID_PLANS.includes(plan)) {
-      console.error(`[Billing] Invalid plan rejected: ${plan}`);
-      return;
-    }
     console.log(`[Billing] Updating user ${userId} to plan: ${plan}`);
     try {
       if (db) {
@@ -2166,7 +2092,18 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   app.post("/api/config/support", async (req, res) => {
-    if (!await verifyAdmin(req, res)) return;
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      const adminUid = process.env.ADMIN_UID;
+      if (!adminUid || decoded.uid !== adminUid) {
+        return res.status(403).json({ error: "Admin only" });
+      }
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
     const { supportEmail, supportWhatsApp, supportEmailLabel, supportWhatsAppLabel } = req.body;
     try {
       if (db) {
@@ -2183,8 +2120,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   app.post("/api/payments/upi-pending", async (req, res) => {
-    if (!apiRateLimit(req, res)) return;
-        const authHeader = req.headers["authorization"] as string;
+    const authHeader = req.headers["authorization"] as string;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
@@ -2195,15 +2131,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       const userEmail = decoded.email || req.body.userEmail || "";
       const amount    = req.body.amount;
-      const rawPlan   = (req.body.plan || "monthly").toLowerCase().trim();
-      const VALID_PLANS = ["monthly", "yearly", "free"];
-      const plan = VALID_PLANS.includes(rawPlan) ? rawPlan : "monthly"; // Whitelist - reject unknown plans
-      // Validate amount is a reasonable number
-      const EXPECTED_AMOUNTS: Record<string, number> = { monthly: 499, yearly: 4999, free: 0 };
-      const expectedAmt = EXPECTED_AMOUNTS[plan] || 0;
-      if (amount && (isNaN(Number(amount)) || Number(amount) < expectedAmt * 0.5)) {
-        return res.status(400).json({ error: "Invalid payment amount" });
-      }
+      const plan      = (req.body.plan || "monthly").toLowerCase().trim();
 
       await db.collection("pendingPayments").add({
         userId: decoded.uid,
@@ -2304,15 +2232,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
     if (event === "payment.captured") {
       const payment = parsedBody.payload?.payment?.entity;
       const userId = payment?.notes?.userId;
-      const plan = (payment?.notes?.plan || "monthly").toLowerCase().trim();
-      const amountPaid = payment?.amount || 0; // in paise
-      // Verify amount paid matches expected plan price
-      const EXPECTED: Record<string, number> = { monthly: 49900, yearly: 538800 };
-      const expected = EXPECTED[plan] || EXPECTED.monthly;
-      if (amountPaid < expected) {
-        console.error(`[Razorpay Webhook] Amount mismatch: paid ${amountPaid}, expected ${expected} for plan ${plan}`);
-        return res.status(400).send("Amount mismatch");
-      }
+      const plan = payment?.notes?.plan || "monthly";
+
       if (userId) {
         await updateUserPlan(userId, plan);
       } else {
@@ -2359,6 +2280,49 @@ https://ai-doc-expiry-tracker.onrender.com`;
   // ═══════════════════════════════════════════════════════════════
   // ADMIN ROUTES — Only accessible by ADMIN_UID
   // ═══════════════════════════════════════════════════════════════
+  const ADMIN_UID = process.env.ADMIN_UID;
+  if (!ADMIN_UID) {
+    console.error("[Admin] ADMIN_UID env var not set — admin routes will be disabled.");
+  }
+
+  // Secure server-side admin check using Firebase ID token
+  const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
+    if (!ADMIN_UID) {
+      res.status(503).json({ error: "Admin not configured" });
+      return false;
+    }
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) {
+      res.status(401).json({ error: "Missing authorization token" });
+      return false;
+    }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      if (decoded.uid !== ADMIN_UID) {
+        res.status(403).json({ error: "Unauthorized: not admin" });
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      res.status(401).json({ error: "Invalid or expired token" });
+      return false;
+    }
+  };
+
+  // Verify any logged-in user — returns decoded token uid or null
+  const verifyUser = async (req: any, res: any): Promise<string | null> => {
+    const authHeader = req.headers["authorization"] as string;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) { res.status(401).json({ error: "Unauthorized" }); return null; }
+    try {
+      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
+      return decoded.uid;
+    } catch {
+      res.status(401).json({ error: "Invalid token" });
+      return null;
+    }
+  };
 
   // GET all users
   app.get("/api/admin/users", async (req, res) => {
@@ -2377,21 +2341,12 @@ https://ai-doc-expiry-tracker.onrender.com`;
         return { id: d.id, ...data, docCount };
       }));
       // Sort by lastLogin desc
-      // Filter out service accounts and system accounts from user list
-      const filteredUsers = users.filter((u: any) => {
-        const email = u.email || "";
-        return !email.includes("gserviceaccount.com") &&
-               !email.includes("firebase-adminsdk") &&
-               u.id !== "system" &&
-               !u.id.match(/^[0-9]{15,}$/); // numeric-only UIDs are service accounts
-      });
-
-      filteredUsers.sort((a: any, b: any) => {
+      users.sort((a: any, b: any) => {
         const ta = a.lastLogin ? new Date(a.lastLogin).getTime() : 0;
         const tb = b.lastLogin ? new Date(b.lastLogin).getTime() : 0;
         return tb - ta;
       });
-      res.json(filteredUsers);
+      res.json(users);
     } catch (err: any) {
       console.error("[Admin] Get users failed:", err.message);
       res.status(500).json({ error: err.message });
@@ -2470,27 +2425,9 @@ https://ai-doc-expiry-tracker.onrender.com`;
     });
   }
 
-  const httpServer = app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
-
-  // Graceful shutdown for Render deploy cycles
-  process.on("SIGTERM", () => {
-    console.log("[Server] SIGTERM received - shutting down gracefully");
-    httpServer.close(() => {
-      console.log("[Server] HTTP server closed");
-      process.exit(0);
-    });
-    setTimeout(() => process.exit(1), 10000);
-  });
 }
-
-// Global error handlers - prevent crash on unhandled errors
-process.on("uncaughtException", (err) => {
-  console.error("[Server] Uncaught exception:", err.message);
-});
-process.on("unhandledRejection", (reason: any) => {
-  console.error("[Server] Unhandled rejection:", reason?.message || reason);
-});
 
 startServer();
