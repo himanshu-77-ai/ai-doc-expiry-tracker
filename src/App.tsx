@@ -693,18 +693,51 @@ export default function App() {
     setIsScanning(true);
     setError(null);
     try {
-      console.log("Starting image compression...");
-      const { blob, base64 } = await compressImage(file);
-      const compressedFile = new File([blob], file.name, { type: 'image/jpeg' });
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' ||
+        file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+
+      if (isPdf) {
+        // PDFs cannot be drawn on canvas — skip compression, upload directly, no AI scan
+        console.log("PDF detected — skipping compression and AI scan. File will be uploaded directly.");
+        setSelectedFile(file);
+        setScannedData(null);
+        setIsScanning(false);
+        setError("PDF uploaded. AI scan is not available for PDFs — please fill in the document details manually below.");
+        return;
+      }
+
+      // For HEIC/HEIF — browser canvas can't decode them natively.
+      // We attempt compressImage which loads via <img> tag; modern Chrome/Safari handle it.
+      // If it fails, we fall back to direct upload without AI scan.
+      let blob: Blob;
+      let base64: string;
+
+      try {
+        console.log(`Starting compression for ${file.type || 'unknown type'}...`);
+        const result = await compressImage(file);
+        blob = result.blob;
+        base64 = result.base64;
+      } catch (compressionErr: any) {
+        if (isHeic) {
+          // HEIC failed in canvas — upload original, skip AI scan
+          console.warn("HEIC compression failed (browser limitation). Uploading original without AI scan.");
+          setSelectedFile(file);
+          setScannedData(null);
+          setIsScanning(false);
+          setError("HEIC/HEIF file uploaded. AI scan is not supported for this format — please fill in details manually.");
+          return;
+        }
+        throw compressionErr; // Other image types — re-throw to outer catch
+      }
+
+      const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
       setSelectedFile(compressedFile);
-      
-      const mimeType = "image/jpeg";
-      console.log("Compression success, starting extraction...", { size: blob.size });
-      
-      const info = await extractDocumentInfo(base64, mimeType);
+
+      console.log("Compression success, starting AI extraction...", { size: blob.size });
+      const info = await extractDocumentInfo(base64, "image/jpeg");
       console.log("AI Extraction success:", info);
-      
-      // Use URL.createObjectURL for faster preview instead of FileReader
+
       const previewUrl = URL.createObjectURL(blob);
       setScannedData({ ...info, fileUrl: previewUrl, base64 });
       setIsScanning(false);
@@ -718,7 +751,7 @@ export default function App() {
   const onDrop = useCallback((acceptedFiles: File[], fileRejections: any[]) => {
     if (fileRejections.length > 0) {
       console.error("File rejections:", fileRejections);
-      setError("Invalid file type. Please upload an image or PDF.");
+      setError("Invalid file type. Supported formats: JPG, PNG, WebP, HEIC, BMP, TIFF, GIF, PDF.");
       return;
     }
     console.log("Files dropped:", acceptedFiles);
@@ -727,7 +760,10 @@ export default function App() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
-    accept: { 'image/*': [], 'application/pdf': [] },
+    accept: { 
+      'image/*': ['.jpeg', '.jpg', '.png', '.webp', '.heic', '.heif', '.bmp', '.tiff', '.tif', '.gif'],
+      'application/pdf': [] 
+    },
     multiple: false
   });
 
@@ -1388,7 +1424,8 @@ Track your document expiry dates with AI.
                     })
                     .catch(reject);
                 } else if (selectedFile) {
-                  const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+                  const fileMetadata = { contentType: selectedFile.type || 'application/octet-stream' };
+                  const uploadTask = uploadBytesResumable(storageRef, selectedFile, fileMetadata);
                   uploadTask.on('state_changed', 
                     (snapshot) => {
                       const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 70 + 10;
@@ -1406,7 +1443,7 @@ Track your document expiry dates with AI.
               });
 
               const timeoutPromise = new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new Error("Storage Timeout")), 20000)
+                setTimeout(() => reject(new Error("Storage Timeout")), 45000)
               );
 
               try {
@@ -1414,13 +1451,22 @@ Track your document expiry dates with AI.
                 console.log("Storage upload successful.");
               } catch (storageErr: any) {
                 console.warn("Storage failed or timed out, falling back to Firestore inline storage:", storageErr.message);
-                // If it's a small enough image, we store it inline
-                if (base64Data && base64Data.length < 800000) { // ~600KB limit
+                // Compressed images are now ~200-400KB — inline storage almost always works
+                if (base64Data && base64Data.length < 1400000) { // ~1MB limit (Firestore doc max 1MB)
                   finalFileData = base64Data;
-                  console.log("Using inline Base64 storage fallback.");
+                  console.log("Using inline Base64 storage fallback. Size:", base64Data.length);
+                } else if (selectedFile && base64Data && base64Data.length >= 1400000) {
+                  // File too large for inline — save document metadata without image
+                  console.warn("File too large for Firestore fallback. Saving document without image.");
+                  finalFileData = null;
+                  finalFileUrl = null;
+                  // Notify user but don't block the save
+                  setError("Image could not be stored (too large), but document details have been saved successfully.");
                 } else {
-                  console.error("File is too large for Firestore fallback and Storage failed.");
-                  throw new Error("Unable to save document image. Firebase Storage is unresponsive and the file is too large for backup storage.");
+                  // No base64 at all and storage failed — save without image
+                  console.warn("No base64 data available. Saving document without image.");
+                  finalFileData = null;
+                  finalFileUrl = null;
                 }
               }
             }
