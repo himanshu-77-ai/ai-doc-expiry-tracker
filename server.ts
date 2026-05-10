@@ -94,13 +94,17 @@ async function sendEmailSMTP({ to, subject, html }: { to: string; subject: strin
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   if (!user || !pass) throw new Error("SMTP_USER or SMTP_PASS not configured");
-  const host = process.env.SMTP_HOST || "smtp-relay.brevo.com";
-  const port = parseInt(process.env.SMTP_PORT || "2525");
+
+  // Auto-detect Gmail — use Gmail SMTP if user is @gmail.com
+  const isGmail = user.toLowerCase().endsWith("@gmail.com");
+  const host = process.env.SMTP_HOST || (isGmail ? "smtp.gmail.com" : "smtp-relay.brevo.com");
+  const port = parseInt(process.env.SMTP_PORT || (isGmail ? "587" : "2525"));
+
   const nodemailer = await import("nodemailer");
   const transporter = nodemailer.createTransport({
     host,
     port,
-    secure: false,
+    secure: port === 465,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
     connectionTimeout: 15000,
@@ -791,20 +795,8 @@ async function startServer() {
 
   app.post("/api/config/upi", async (req, res) => {
     if (!await verifyAdmin(req, res)) return;
-    // Only admin can update UPI settings
-    const authHeader = req.headers["authorization"] as string;
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return res.status(401).json({ error: "Unauthorized" });
-    try {
-      const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
-      const adminUid = process.env.ADMIN_UID;
-      if (!adminUid || decoded.uid !== adminUid) {
-        return res.status(403).json({ error: "Admin only" });
-      }
-    } catch {
-      return res.status(401).json({ error: "Invalid token" });
-    }
     const { upiId, upiName } = req.body;
+    if (!upiId || !upiName) return res.status(400).json({ error: "Missing upiId or upiName" });
     try {
       if (db) {
         await db.collection("settings").doc("payment").set({ upiId, upiName }, { merge: true });
