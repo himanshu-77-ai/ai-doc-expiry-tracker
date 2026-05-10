@@ -246,11 +246,12 @@ export default function App() {
     if (!user) return;
     setIsSavingSettings(true);
     try {
+      const token = await user.getIdToken();
       const response = await fetch("/api/user/report-settings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${await user.getIdToken()}`
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
           userId: user.uid,
@@ -259,13 +260,16 @@ export default function App() {
         })
       });
       if (response.ok) {
-        alert("Report schedule updated successfully!");
+        alert("Report schedule updated successfully! ✅");
       } else {
-        alert("Failed to update schedule.");
+        const data = await response.json().catch(() => ({}));
+        const msg = data.details || data.error || `Server error (${response.status})`;
+        console.error("Save settings failed:", msg);
+        alert(`Failed to save schedule: ${msg}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save settings error:", err);
-      alert("Error saving report schedule.");
+      alert(`Network error: ${err.message || "Could not connect to server"}`);
     } finally {
       setIsSavingSettings(false);
     }
