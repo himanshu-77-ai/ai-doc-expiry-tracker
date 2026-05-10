@@ -1512,7 +1512,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
       if (!success) {
         const saToken = await getServiceAccountToken();
-        const effectiveToken = userToken || saToken;
+        // Extract user's own bearer token for REST fallback auth
+        const authHeader = req.headers["authorization"] as string;
+        const reqUserToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+        const effectiveToken = reqUserToken || saToken;
         const updateData = {
           fields: {
             displayName: { stringValue: displayName },
@@ -1550,11 +1553,11 @@ https://ai-doc-expiry-tracker.onrender.com`;
   });
 
   // Update User Report Settings
-    app.post("/api/user/report-settings", async (req, res) => {
+  app.post("/api/user/report-settings", async (req, res) => {
     const uid = await verifyUser(req, res);
     if (!uid) return;
     const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
-    if (!userId)
+    if (!userId) {
       return res.status(400).json({ error: "Missing userId" });
     }
 
@@ -1584,7 +1587,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
       if (!success) {
         // REST fallback for setting user preferences
         const saToken = await getServiceAccountToken();
-        const effectiveToken = userToken || saToken;
+        // Extract user's own bearer token for REST fallback auth
+        const authHeader = req.headers["authorization"] as string;
+        const reqUserToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+        const effectiveToken = reqUserToken || saToken;
         
         const updateData: any = {
           fields: {}
@@ -1637,7 +1643,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
             });
           };
 
-          console.log(`[Report Settings] Attempting REST PATCH to ${dbId} for user ${userId} (Token: ${effectiveToken ? (userToken ? 'User' : 'SA') : 'None'})`);
+          console.log(`[Report Settings] Attempting REST PATCH to ${dbId} for user ${userId} (Token: ${effectiveToken ? (reqUserToken ? 'User' : 'SA') : 'None'})`);
           
           // 1. Try with token and updateMask
           let res = await performRequest(true, true);
@@ -1999,6 +2005,27 @@ https://ai-doc-expiry-tracker.onrender.com`;
   // Check scheduled reports every minute for precision
   cron.schedule("* * * * *", () => {
     checkScheduledReports();
+  });
+
+  // ── AI / Groq Proxy — avoids CORS issues with direct browser→Groq calls ──
+  app.post("/api/ai/chat", async (req, res) => {
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
+    const groqKey = process.env.GEMINI_API_KEY; // reusing env var name
+    if (!groqKey) return res.status(500).json({ error: "AI API key not configured" });
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
+        body: JSON.stringify(req.body)
+      });
+      const data = await response.json();
+      if (!response.ok) return res.status(response.status).json(data);
+      res.json(data);
+    } catch (err: any) {
+      console.error("[AI Proxy]", err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Helper to update user plan
