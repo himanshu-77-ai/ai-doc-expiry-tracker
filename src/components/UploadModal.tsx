@@ -90,7 +90,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: onFileUpload,
     accept: {
-      'image/*': ['.jpeg', '.jpg', '.png'],
+      'image/*': ['.jpeg', '.jpg', '.png', '.webp', '.heic', '.heif', '.bmp', '.tiff', '.tif', '.gif'],
       'application/pdf': ['.pdf']
     },
     multiple: false
@@ -112,17 +112,27 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </button>
         </div>
         <div className="p-4 lg:p-8 space-y-6 max-h-[85vh] overflow-y-auto">
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={18} />
-                <p className="text-sm font-medium">{error}</p>
+          {error && (() => {
+            const isPdfInfo = (error.toLowerCase().includes('pdf') || error.toLowerCase().includes('heic') || error.toLowerCase().includes('heif')) && error.toLowerCase().includes('manually');
+            return (
+              <div className={`p-4 border rounded-xl flex items-center justify-between mb-4 ${
+                isPdfInfo
+                  ? 'bg-blue-50 border-blue-100 text-blue-700'
+                  : 'bg-red-50 border-red-100 text-red-600'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {isPdfInfo
+                    ? <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    : <AlertTriangle size={18} />
+                  }
+                  <p className="text-sm font-medium">{error}</p>
+                </div>
+                <button onClick={() => setError?.(null)} className={`p-1 rounded ${isPdfInfo ? 'hover:bg-blue-100' : 'hover:bg-red-100'}`}>
+                  <X size={16} />
+                </button>
               </div>
-              <button onClick={() => setError(null)} className="hover:bg-red-100 p-1 rounded">
-                <X size={16} />
-              </button>
-            </div>
-          )}
+            );
+          })()}
           
           <div 
             {...getRootProps()} 
@@ -148,7 +158,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </div>
                   <div className="text-center">
                     <p className="font-bold text-sm">Upload File</p>
-                    <p className="text-gray-500 text-[10px]">Drag & drop or click</p>
+                    <p className="text-gray-500 text-[10px]">JPG · PNG · WebP · HEIC · PDF · more</p>
                   </div>
                 </div>
                 <div 
