@@ -2,30 +2,36 @@ services:
   - type: web
     name: ai-doc-expiry-tracker
     env: node
+    autoDeploy: true          # ← Yeh line add ki — har GitHub push pe auto deploy hoga
     buildCommand: npm install && npm run build
     startCommand: node --loader tsx/esm server.ts
     envVars:
       - key: NODE_ENV
         value: production
+
+      # ── Yeh sab Render Dashboard → Environment mein set karo ──
+      # render.yaml mein kabhi bhi real secrets mat likho (GitHub pe expose hote hain)
+
       - key: GEMINI_API_KEY
-        value: AIzaSyC1W_R3vSxiiSCIkD_oe83xmXWdnRjXAVI
+        sync: false           # Render Dashboard se lega — yahan value mat likho
+
       - key: RAZORPAY_KEY_ID
-        value: rzp_test_SWC78pM3DZlUME
+        sync: false
+
       - key: RAZORPAY_KEY_SECRET
-        value: QufwmCmqP07lOPdhMsYTEDGd
-      # IMPORTANT: Replace this with the REAL secret from Razorpay Dashboard:
-      # Razorpay Dashboard → Webhooks → (your webhook) → Secret
-      # The value below is a placeholder — webhook signature will FAIL if not replaced
+        sync: false
+
       - key: RAZORPAY_WEBHOOK_SECRET
-        value: my_super_secret_123
+        sync: false
+
       - key: SMTP_USER
-        value: himansh.cs91@gmail.com
+        sync: false
+
       - key: SMTP_PASS
-        value: jvyjmqustztbbcho
-      # Admin UID — required for admin panel + UPI config save
-      # Get from Firebase Console → Authentication → Users → your admin account UID
+        sync: false
+
       - key: ADMIN_UID
-        value: REPLACE_WITH_YOUR_FIREBASE_ADMIN_UID
-      # VITE_ prefix makes this available at frontend build time
+        sync: false
+
       - key: VITE_ADMIN_UID
-        value: REPLACE_WITH_YOUR_FIREBASE_ADMIN_UID
+        sync: false
