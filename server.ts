@@ -48,6 +48,25 @@ const auth = buildGoogleAuth();
 const DEBUG = process.env.DEBUG === "true";
 const log = (...args: any[]) => { if (DEBUG) console.log(...args); };
 
+// ── HTML ESCAPE — prevents XSS in all email templates ────────────────────────
+function escHtml(str: any): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
+// ── URL SAFETY CHECK — prevents open redirect / href injection ────────────────
+function isSafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch { return false; }
+}
+
 // Initialize Stripe lazily
 let stripe: Stripe | null = null;
 const getStripe = () => {
@@ -131,6 +150,8 @@ async function sendWhatsApp(to: string, message: string) {
   let normalized = to.replace(/^whatsapp:/i, "").trim();
   // If number is 10 digits (Indian mobile without country code), add +91
   if (/^\d{10}$/.test(normalized)) normalized = "+91" + normalized;
+  // BUG-11 FIX: Handle 0-prefix Indian numbers e.g. 07210033172 → +917210033172
+  else if (/^0\d{10}$/.test(normalized)) normalized = "+91" + normalized.slice(1);
   // If number starts with 91 and is 12 digits, add +
   else if (/^91\d{10}$/.test(normalized)) normalized = "+" + normalized;
   // If no + prefix at all, add +
@@ -429,7 +450,36 @@ async function startServer() {
     console.error("[Firebase] Critical Initialization Error:", err);
   }
 
-  app.use(express.json());
+  // ── CORS — restrict to known origins ─────────────────────────────────────
+  const allowedOrigins = [
+    process.env.APP_URL || "https://ai-doc-expiry-tracker.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+  ].filter(Boolean);
+
+  app.use((req: any, res: any, next: any) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Cron-Secret");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  });
+
+  // ── Security headers ──────────────────────────────────────────────────────
+  app.use((_req: any, res: any, next: any) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+
+  // ── Body parser — 2MB limit (covers base64 images + JSON payloads) ────────
+  app.use(express.json({ limit: "2mb" }));
 
   // ── KEEP-ALIVE & HEALTH (cron-job.org) ──────────────────────────────────
   // Keep Alive job:  GET  /api/health        every 10 min
@@ -438,11 +488,24 @@ async function startServer() {
   app.head("/api/health", (_req, res) => res.status(200).end());
   app.get("/api/ping", (_req, res) => res.json({ ok: true, ts: Date.now() }));
   app.post("/api/ping", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+  // ── PROTECTED cron trigger — requires X-Cron-Secret header ─────────────────
+  // Set CRON_SECRET in Render env vars; use same value in cron-job.org headers.
+  // Leave CRON_SECRET unset in dev to keep open (same behaviour as before).
   app.post("/api/ping/reminders", (req, res) => {
+    const cronSecret = process.env.CRON_SECRET;
+    const provided   = (req.headers["x-cron-secret"] as string) || (req.query.secret as string);
+    if (cronSecret && provided !== cronSecret) {
+      return res.status(401).json({ error: "Unauthorized: invalid cron secret" });
+    }
     res.json({ ok: true });
     setImmediate(() => { checkAndSendReminders().catch(console.error); });
   });
   app.get("/api/ping/reminders", (req, res) => {
+    const cronSecret = process.env.CRON_SECRET;
+    const provided   = (req.headers["x-cron-secret"] as string) || (req.query.secret as string);
+    if (cronSecret && provided !== cronSecret) {
+      return res.status(401).json({ error: "Unauthorized: invalid cron secret" });
+    }
     res.json({ ok: true });
     setImmediate(() => { checkAndSendReminders().catch(console.error); });
   });
@@ -725,13 +788,18 @@ async function startServer() {
     const uid = await verifyUser(req, res);
     if (!uid) return;
     const { amount, currency = "INR" } = req.body; // Default to INR for Razorpay/UPI context
+    // SECURITY FIX: Validate amount — prevents NaN*100=NaN, 0, negative, or missing values
+    const numAmount = Number(amount);
+    if (!amount || isNaN(numAmount) || numAmount <= 0 || numAmount > 1000000) {
+      return res.status(400).json({ error: "Invalid amount. Must be a positive number up to ₹10,00,000." });
+    }
     const rzp = getRazorpay();
     if (!rzp) {
       return res.status(500).json({ error: "Razorpay is not configured on the server." });
     }
     try {
       const options = {
-        amount: amount * 100, // amount in the smallest currency unit
+        amount: Math.round(numAmount * 100), // amount in paise, rounded to avoid float errors
         currency,
         receipt: `receipt_${Date.now()}`,
       };
@@ -748,6 +816,15 @@ async function startServer() {
     const uid = await verifyUser(req, res);
     if (!uid) return;
     const { planName, amount, currency = "usd" } = req.body;
+    // SECURITY FIX: Validate planName and amount
+    const validPlans = ["monthly", "yearly", "Monthly", "Yearly"];
+    if (!planName || !validPlans.includes(planName)) {
+      return res.status(400).json({ error: "Invalid plan name" });
+    }
+    const stripeAmount = Number(amount);
+    if (!amount || isNaN(stripeAmount) || stripeAmount <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
     const stripeClient = getStripe();
     
     if (!stripeClient) {
@@ -764,7 +841,7 @@ async function startServer() {
               product_data: {
                 name: `AI Tracker ${planName} Subscription`,
               },
-              unit_amount: amount * 100,
+              unit_amount: Math.round(stripeAmount * 100),
             },
             quantity: 1,
           },
@@ -772,6 +849,8 @@ async function startServer() {
         mode: "payment",
         success_url: `${req.headers.origin}/?payment=success`,
         cancel_url: `${req.headers.origin}/?payment=cancel`,
+        // SECURITY FIX: Store userId + plan in metadata so webhook can upgrade the correct user
+        metadata: { userId: uid, plan: planName },
       });
 
       res.json({ id: session.id });
@@ -867,6 +946,12 @@ async function startServer() {
     const { email, phone, inviteLink, method = "email" } = req.body;
     if (!inviteLink) return res.status(400).json({ error: "Missing inviteLink" });
 
+    // Validate invite link to prevent href injection
+    if (!isSafeUrl(inviteLink)) {
+      return res.status(400).json({ error: "Invalid invite link format" });
+    }
+    const safeInviteLink = escHtml(inviteLink);
+
     try {
       if (method === "whatsapp" || method === "both") {
         if (!phone) return res.status(400).json({ error: "Missing phone for WhatsApp invite" });
@@ -899,9 +984,9 @@ _AI Tracker — Smart Document Intelligence_`;
                 <p style="margin: 8px 0 0; font-size: 14px; color: #166534;">✅ Collaborate with your team on shared documents</p>
               </div>
               <div style="text-align: center; margin-bottom: 24px;">
-                <a href="${inviteLink}" style="display: inline-block; padding: 14px 32px; background: #2563EB; color: white; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px; letter-spacing: 0.3px;">Accept Invitation →</a>
+                <a href="${safeInviteLink}" style="display: inline-block; padding: 14px 32px; background: #2563EB; color: white; text-decoration: none; border-radius: 12px; font-weight: bold; font-size: 16px; letter-spacing: 0.3px;">Accept Invitation →</a>
               </div>
-              <p style="font-size: 12px; color: #9CA3AF; text-align: center; margin: 0;">Or copy this link: <a href="${inviteLink}" style="color: #2563EB;">${inviteLink}</a></p>
+              <p style="font-size: 12px; color: #9CA3AF; text-align: center; margin: 0;">Or copy this link: <a href="${safeInviteLink}" style="color: #2563EB;">${safeInviteLink}</a></p>
               <hr style="border: none; border-top: 1px solid #F3F4F6; margin: 24px 0;" />
               <p style="font-size: 11px; color: #D1D5DB; text-align: center; margin: 0;">AI Tracker — Smart Document Intelligence. If you didn't expect this email, you can safely ignore it.</p>
             </div>
@@ -936,11 +1021,15 @@ _AI Tracker — Smart Document Intelligence_`;
     }
   });
 
-  // WhatsApp Status
+  // WhatsApp Status — auth required (prevents Twilio config leakage)
   app.get("/api/notifications/whatsapp/status", async (req, res) => {
+    // SECURITY FIX: Auth required — prevents unauthenticated config enumeration
+    const uid = await verifyUser(req, res);
+    if (!uid) return;
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
     if (!sid || !token) return res.status(500).json({ configured: false, error: "Twilio not configured" });
+    // Only return non-sensitive config (never return SID/token)
     res.json({ configured: true, from: process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886" });
   });
 
@@ -1259,16 +1348,16 @@ _AI Tracker — Smart Document Intelligence_`;
               // FIXED: SMTP — sends to ALL users, no domain needed
               await sendEmailSMTP({
                 to: user.email,
-                subject: `Action Required: ${doc.title} Expiring in ${days} Days`,
+                subject: `Action Required: ${escHtml(doc.title)} Expiring in ${days} Days`,
                 html: `
                   <div style="font-family: sans-serif; padding: 20px; color: #333; border: 1px solid #eee; border-radius: 12px; max-width: 600px;">
                     <h2 style="color: #E11D48; margin-top: 0;">Expiry Alert</h2>
                     <p>Hello,</p>
-                    <p>Your document <strong>${doc.title}</strong> is set to expire on <strong>${fmtDate(doc.expiryDate)}</strong> (${days} days from now).</p>
+                    <p>Your document <strong>${escHtml(doc.title)}</strong> is set to expire on <strong>${fmtDate(doc.expiryDate)}</strong> (${days} days from now).</p>
                     <div style="background: #F9FAFB; padding: 20px; border-radius: 12px; margin: 24px 0; border: 1px solid #F3F4F6;">
                       <p style="margin: 0; font-weight: bold; color: #111827;">Document Details:</p>
-                      <p style="margin: 8px 0 0 0; color: #4B5563;">Type: ${doc.category}</p>
-                      <p style="margin: 4px 0 0 0; color: #4B5563;">Number: ${doc.documentNumber || 'N/A'}</p>
+                      <p style="margin: 8px 0 0 0; color: #4B5563;">Type: ${escHtml(doc.category)}</p>
+                      <p style="margin: 4px 0 0 0; color: #4B5563;">Number: ${escHtml(doc.documentNumber || 'N/A')}</p>
                     </div>
                     <p>Please log in to AI Tracker to review or renew this document.</p>
                     <a href="${process.env.APP_URL || 'https://ai-doc-expiry-tracker.onrender.com'}" style="display: inline-block; padding: 12px 24px; background: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; margin-top: 10px;">Open Dashboard</a>
@@ -1435,8 +1524,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
         const { text, color } = getStatusInfo(doc.expiryDate, interval);
         return `
           <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${escHtml(doc.title)}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${escHtml(doc.category)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmtDate(doc.expiryDate)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">${text}</td>
           </tr>
@@ -1551,6 +1640,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
     const { userId, frequency, time, expiryInterval, displayName, photoURL, whatsappPhone, phone, waFreq, waTime, emailAlerts } = req.body;
     if (!userId) {
       return res.status(400).json({ error: "Missing userId" });
+    }
+    // SECURITY FIX: Prevent any authenticated user from modifying another user's settings
+    if (uid !== userId && uid !== ADMIN_UID) {
+      return res.status(403).json({ error: "Forbidden: cannot modify another user's settings" });
     }
 
     try {
@@ -1698,6 +1791,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
     const uid = await verifyUser(req, res);
     if (!uid) return;
     const { userId } = req.params;
+    // SECURITY FIX: Prevent cross-user data read (any user could read any user's settings)
+    if (uid !== userId && uid !== ADMIN_UID) {
+      return res.status(403).json({ error: "Forbidden: cannot read another user's settings" });
+    }
     if (uid !== userId && uid !== ADMIN_UID) return res.status(403).json({ error: "Forbidden" });
     try {
       let userData: any = null;
@@ -1743,8 +1840,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
         const { text, color } = getStatusInfo(doc.expiryDate, interval);
         return `
           <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.title}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #eee;">${doc.category}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${escHtml(doc.title)}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${escHtml(doc.category)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee;">${fmtDate(doc.expiryDate)}</td>
             <td style="padding: 12px; border-bottom: 1px solid #eee; color: ${color}; font-weight: bold;">
               ${text}
@@ -2174,10 +2271,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
               <div style="font-family:sans-serif;max-width:500px">
                 <h2 style="color:#ea580c">💰 New UPI Payment Pending</h2>
                 <table style="width:100%;border-collapse:collapse">
-                  <tr><td style="padding:8px;color:#666">User Email</td><td style="padding:8px;font-weight:bold">${userEmail}</td></tr>
-                  <tr style="background:#f9f9f9"><td style="padding:8px;color:#666">Plan</td><td style="padding:8px;font-weight:bold;text-transform:capitalize">${plan}</td></tr>
-                  <tr><td style="padding:8px;color:#666">Amount</td><td style="padding:8px;font-weight:bold">₹${amount}</td></tr>
-                  <tr style="background:#f9f9f9"><td style="padding:8px;color:#666">User ID</td><td style="padding:8px;font-family:monospace;font-size:12px">${decoded.uid}</td></tr>
+                  <tr><td style="padding:8px;color:#666">User Email</td><td style="padding:8px;font-weight:bold">${escHtml(userEmail)}</td></tr>
+                  <tr style="background:#f9f9f9"><td style="padding:8px;color:#666">Plan</td><td style="padding:8px;font-weight:bold;text-transform:capitalize">${escHtml(plan)}</td></tr>
+                  <tr><td style="padding:8px;color:#666">Amount</td><td style="padding:8px;font-weight:bold">₹${escHtml(String(amount))}</td></tr>
+                  <tr style="background:#f9f9f9"><td style="padding:8px;color:#666">User ID</td><td style="padding:8px;font-family:monospace;font-size:12px">${escHtml(decoded.uid)}</td></tr>
                   <tr><td style="padding:8px;color:#666">Time</td><td style="padding:8px">${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</td></tr>
                 </table>
                 <br/>
@@ -2199,7 +2296,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
     }
   });
 
-  // Razorpay direct upgrade fallback (in case webhook is delayed)
+  // Razorpay direct upgrade — NOW verifies payment status with Razorpay API
+  // SECURITY FIX: a fake/random paymentId no longer upgrades a user for free.
   app.post("/api/payments/razorpay-direct", async (req, res) => {
     const authHeader = req.headers["authorization"] as string;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -2208,8 +2306,38 @@ https://ai-doc-expiry-tracker.onrender.com`;
       const decoded = await (admin.apps[0] ? admin.auth(admin.apps[0]) : admin.auth()).verifyIdToken(token);
       const { paymentId, plan } = req.body;
       if (!paymentId || !plan) return res.status(400).json({ error: "Missing paymentId or plan" });
+
+      const validPlans = ["monthly", "yearly"];
+      if (!validPlans.includes(plan.toLowerCase())) {
+        return res.status(400).json({ error: "Invalid plan value" });
+      }
+
+      // ── CRITICAL: verify the payment actually exists and was captured ────────
+      const rzp = getRazorpay();
+      if (!rzp) return res.status(500).json({ error: "Razorpay not configured" });
+
+      let payment: any;
+      try {
+        payment = await rzp.payments.fetch(paymentId);
+      } catch (fetchErr: any) {
+        console.warn(`[Razorpay Direct] Payment lookup failed for ${paymentId}:`, fetchErr.message);
+        return res.status(400).json({ error: "Invalid payment ID: payment not found" });
+      }
+
+      if (payment.status !== "captured") {
+        console.warn(`[Razorpay Direct] Payment ${paymentId} status='${payment.status}' — not captured. Rejecting.`);
+        return res.status(400).json({ error: `Payment not captured. Status: ${payment.status}` });
+      }
+
+      // Ensure payment belongs to this user if notes.userId was set during order creation
+      const notesUserId = (payment as any).notes?.userId;
+      if (notesUserId && notesUserId !== decoded.uid) {
+        console.error(`[Razorpay Direct] userId mismatch: token=${decoded.uid}, notes=${notesUserId}`);
+        return res.status(403).json({ error: "Payment does not belong to this user" });
+      }
+
       await updateUserPlan(decoded.uid, plan);
-      console.log(`[Razorpay Direct] Upgraded user ${decoded.uid} to ${plan} via paymentId ${paymentId}`);
+      console.log(`[Razorpay Direct] Verified & upgraded user ${decoded.uid} to ${plan} (paymentId: ${paymentId})`);
       res.json({ success: true });
     } catch (err: any) {
       console.error("[Razorpay Direct]", err.message);
