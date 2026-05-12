@@ -216,7 +216,8 @@ export default function App() {
     }
     setIsSendingReport(true);
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await user.getIdToken(true).catch(() => null);
+      if (!token) { alert("Authentication error. Please refresh and try again."); setIsSendingReport(false); return; }
       const response = await fetch("/api/notifications/send-report", {
         method: "POST",
         headers: { 
@@ -274,7 +275,8 @@ export default function App() {
   const triggerReminders = async () => {
     setIsTriggeringReminders(true);
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await user?.getIdToken(true).catch(() => null);
+      if (!token) { setIsTriggeringReminders(false); return; }
       const response = await fetch("/api/notifications/trigger-reminders", {
         method: "POST",
         headers: {
@@ -647,7 +649,7 @@ export default function App() {
     }).length,
     expired: documents.filter(d => {
       const computed = getStatus(d.expiryDate);
-      return computed === 'Expired';
+      return computed === 'Expired' && d.status !== 'Renewed';
     }).length,
   }), [documents, getStatus]);
 
@@ -1443,7 +1445,7 @@ Track your document expiry dates with AI.
               });
 
               const timeoutPromise = new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new Error("Storage Timeout")), 8000)
+                setTimeout(() => reject(new Error("Storage Timeout")), 45000)
               );
 
               try {
