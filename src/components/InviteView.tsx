@@ -108,6 +108,13 @@ export function InviteView({
   };
 
   // ── Schedule WhatsApp report ─────────────────────────────────────
+  // Clear phone from localStorage when component unmounts (security: shared devices)
+  React.useEffect(() => {
+    return () => {
+      // Do NOT persist phone on cleanup — cleared intentionally for security
+    };
+  }, []);
+
   const [scheduleFreq, setScheduleFreq] = useState(
     () => localStorage.getItem("wa_report_freq") || "weekly"
   );
@@ -275,7 +282,7 @@ export function InviteView({
 
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
           <p className="text-xs text-amber-700 font-medium">
-            📌 Note: WhatsApp schedule preference is saved locally. You'll receive reports when you manually click "Send Report" or via the automated Twilio integration (if configured).
+            📌 Note: Schedule preference is saved locally on this device. Automated WhatsApp reports require the Twilio integration to be configured by your admin. Manual reports always work via the button above.
           </p>
         </div>
 
