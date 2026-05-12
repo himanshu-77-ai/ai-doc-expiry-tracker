@@ -7,12 +7,12 @@ import {
 import { auth } from "../lib/firebase";
 
 // ── CONSTANTS ────────────────────────────────────────────────────────────────
-// SECURITY: ADMIN_UID is NOT exported here — it lives only in the server env var.
-// The UI still uses the UID for route-level display gating, read from App.tsx
-// which gets it from the server /api/config/status response or firebase claims.
-// We keep a local reference purely for the "Access Denied" guard — the server
-// independently verifies the Firebase ID token, so spoofing this has no effect.
-export const ADMIN_UID = import.meta.env.VITE_ADMIN_UID || "v7U6iaF8wpXBLE9m1A3Crbeq5hq2";
+// SECURITY: ADMIN_UID is read from the VITE_ADMIN_UID env var ONLY.
+// The hardcoded fallback was removed to prevent the admin UID from being
+// compiled into the public JS bundle. The server independently verifies
+// every admin action via Firebase ID token + ADMIN_UID env var — a wrong/empty
+// VITE_ADMIN_UID here only hides the Admin tab in the UI; it does NOT grant access.
+export const ADMIN_UID = import.meta.env.VITE_ADMIN_UID || "";
 
 export const PLAN_CONFIG = {
   free:    { label: "Free",    docLimit: 5,  price: "$0"  },
