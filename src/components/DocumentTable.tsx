@@ -120,8 +120,8 @@ export const DocumentTable: React.FC<DocumentTableProps> = ({
                   </td>
                   <td className="px-6 py-5">
                     <div className="flex flex-col">
-                      <span className="text-sm font-bold text-gray-900">{format(parseISO(doc.expiryDate), 'dd/MM/yyyy')}</span>
-                      <span className="text-[10px] text-gray-400 font-bold">{format(parseISO(doc.expiryDate), 'EEEE')}</span>
+                      <span className="text-sm font-bold text-gray-900">{doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd/MM/yyyy') : 'No date'}</span>
+                      <span className="text-[10px] text-gray-400 font-bold">{doc.expiryDate ? format(parseISO(doc.expiryDate), 'EEEE') : ''}</span>
                     </div>
                   </td>
                   <td className="px-6 py-5">
