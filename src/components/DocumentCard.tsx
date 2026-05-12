@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { Document } from "../types";
+import { getDynamicStatus } from "../lib/utils";
 
 interface DocumentCardProps {
   doc: Document;
@@ -73,10 +74,16 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({ doc, onClick, onDele
           <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Expires On</p>
           <p className="text-sm font-bold text-gray-700">{doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd/MM/yyyy') : 'No expiry set'}</p>
         </div>
-        <div className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 border ${getStatusColor(doc.status)}`}>
-          {getStatusIcon(doc.status)}
-          {doc.status}
-        </div>
+        {(() => {
+          // Use computed status for accuracy — but preserve 'Renewed' override
+          const computedStatus = doc.status === 'Renewed' ? 'Renewed' : getDynamicStatus(doc.expiryDate);
+          return (
+            <div className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 border ${getStatusColor(computedStatus)}`}>
+              {getStatusIcon(computedStatus)}
+              {computedStatus}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
