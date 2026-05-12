@@ -34,9 +34,9 @@ service cloud.firestore {
              exists(/databases/$(database)/documents/system/$(request.auth.uid));
     }
 
-    match /{path=**} {
-      allow read, write: if isServiceAccount() || isSystemAdmin();
-    }
+    // NOTE: The /{path=**} wildcard rule was removed.
+    // It granted full DB read/write to anyone in system/ collection (privilege escalation risk).
+    // The Admin SDK (used by the server) bypasses ALL rules — this wildcard only helped attackers.
 
     match /users/{userId} {
       allow read, write: if isOwner(userId) || isAdmin() || isServiceAccount() || isSystemAdmin();
