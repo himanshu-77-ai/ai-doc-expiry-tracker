@@ -6,7 +6,7 @@ import Razorpay from "razorpay";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import admin from "firebase-admin";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { GoogleAuth } from "google-auth-library";
 import { readFileSync } from "fs";
 import Stripe from "stripe";
@@ -528,6 +528,9 @@ async function startServer() {
   console.log("- RAZORPAY_KEY_ID:", process.env.RAZORPAY_KEY_ID ? "Configured" : "Missing");
   console.log("- RAZORPAY_KEY_SECRET:", process.env.RAZORPAY_KEY_SECRET ? "Configured" : "Missing");
   console.log("- GEMINI_API_KEY:", process.env.GEMINI_API_KEY ? "Configured" : "Missing");
+  console.log("- ADMIN_UID:", process.env.ADMIN_UID ? "Configured" : "⚠️  MISSING — Admin features (UPI save, report schedule) will return 503");
+  console.log("- TWILIO_ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID ? "Configured" : "Missing — WhatsApp disabled");
+  console.log("- CRON_SECRET:", process.env.CRON_SECRET ? "Configured" : "Not set — /api/ping/reminders is open");
 
   // Razorpay Initialization
   let razorpayInstance: Razorpay | null = null;
@@ -1581,7 +1584,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
         try {
           const profileUpdate: any = {
             displayName,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            updatedAt: FieldValue.serverTimestamp()
           };
           if (whatsappPhone !== undefined) profileUpdate.whatsappPhone = whatsappPhone;
           await db.collection("users").doc(userId).set(profileUpdate, { merge: true });
@@ -1651,7 +1654,7 @@ https://ai-doc-expiry-tracker.onrender.com`;
       if (db) {
         try {
           const updateData: any = {
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            updatedAt: FieldValue.serverTimestamp()
           };
           if (frequency && time) updateData.reportSettings = { frequency, time, lastSent: null };
           if (expiryInterval) updateData.expiryInterval = expiryInterval.toString();
@@ -1665,7 +1668,8 @@ https://ai-doc-expiry-tracker.onrender.com`;
           await db.collection("users").doc(userId).set(updateData, { merge: true });
           success = true;
         } catch (adminErr: any) {
-          console.warn("[Report Settings] Admin SDK failed, using REST fallback:", adminErr.message);
+          console.error("[Report Settings] Admin SDK FAILED:", adminErr.code, adminErr.message);
+          // Admin SDK failed — will try REST fallback
         }
       }
 
@@ -1779,9 +1783,10 @@ https://ai-doc-expiry-tracker.onrender.com`;
           throw new Error(`REST Update failed: ${restRes.status} - ${errText}`);
         }
       }
+      console.log(`[Report Settings] Successfully saved settings for user ${userId}`);
       res.json({ success: true });
     } catch (error: any) {
-      console.error("Update settings error:", error);
+      console.error("[Report Settings] FINAL ERROR:", error.message);
       res.status(500).json({ error: "Failed to update settings", details: error.message });
     }
   });
@@ -2428,14 +2433,17 @@ https://ai-doc-expiry-tracker.onrender.com`;
   // ADMIN ROUTES — Only accessible by ADMIN_UID
   // ═══════════════════════════════════════════════════════════════
   const ADMIN_UID = process.env.ADMIN_UID;
-  if (!ADMIN_UID) {
-    console.error("[Admin] ADMIN_UID env var not set — admin routes will be disabled.");
-  }
+  // Log clearly so admin knows what to set
+  console.log(`- ADMIN_UID: ${ADMIN_UID ? "Configured" : "NOT SET — set ADMIN_UID env var in Render for admin features"}`);
+  console.log(`- VITE_ADMIN_UID: ${process.env.VITE_ADMIN_UID ? "Configured" : "NOT SET — set VITE_ADMIN_UID for Admin tab visibility"}`);
 
   // Secure server-side admin check using Firebase ID token
   const verifyAdmin = async (req: any, res: any): Promise<boolean> => {
     if (!ADMIN_UID) {
-      res.status(503).json({ error: "Admin not configured" });
+      res.status(503).json({ 
+        error: "Admin not configured on server",
+        fix: "Set ADMIN_UID environment variable in Render dashboard to your Firebase UID"
+      });
       return false;
     }
     const authHeader = req.headers["authorization"] as string;
