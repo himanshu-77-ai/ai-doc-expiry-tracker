@@ -101,9 +101,14 @@ export const SubscriptionView: React.FC<SubscriptionViewProps> = ({
         const stripe = await loadStripe((import.meta as any).env.VITE_STRIPE_PUBLISHABLE_KEY || "pk_test_placeholder");
         if (!stripe) throw new Error("Stripe failed to load");
 
+        const stripeToken = await auth.currentUser?.getIdToken();
+        if (!stripeToken) throw new Error("Not authenticated. Please sign in and try again.");
         const response = await fetch("/api/payments/create-checkout-session", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${stripeToken}`
+          },
           body: JSON.stringify({ planName: plan.name, amount: usdAmount }),
         });
         const session = await response.json();
