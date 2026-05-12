@@ -183,7 +183,8 @@ export default function App() {
     if (!user || !phoneToUse) return;
     setIsSendingWhatsAppReport(true);
     try {
-      const token = await user.getIdToken();
+      const token = await user.getIdToken(true).catch(() => null);
+      if (!token) { setError("Authentication error. Please refresh."); setIsSendingWhatsAppReport(false); return; }
       const res = await fetch("/api/notifications/whatsapp", {
         method: "POST",
         headers: { 
@@ -259,14 +260,15 @@ export default function App() {
           ...reportSettings
         })
       });
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
         alert("Report schedule updated successfully!");
       } else {
-        alert("Failed to update schedule.");
+        alert(`Failed to update schedule: ${data.details || data.error || response.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save settings error:", err);
-      alert("Error saving report schedule.");
+      alert(`Error saving report schedule: ${err.message}`);
     } finally {
       setIsSavingSettings(false);
     }
@@ -275,7 +277,8 @@ export default function App() {
   const triggerReminders = async () => {
     setIsTriggeringReminders(true);
     try {
-      const token = await user?.getIdToken(true).catch(() => null);
+      if (!user) { setIsTriggeringReminders(false); return; }
+      const token = await user.getIdToken(true).catch(() => null);
       if (!token) { setIsTriggeringReminders(false); return; }
       const response = await fetch("/api/notifications/trigger-reminders", {
         method: "POST",
