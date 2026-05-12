@@ -131,7 +131,7 @@ export function RemindersView({
                 </div>
                 <div className="flex-1">
                   <p className="font-bold text-gray-900 text-lg">{doc.title} is {ui.label.toLowerCase()}</p>
-                  <p className="text-sm text-gray-500 font-medium">Expires on {format(parseISO(doc.expiryDate), 'dd/MM/yyyy')}</p>
+                  <p className="text-sm text-gray-500 font-medium">Expires on {doc.expiryDate ? format(parseISO(doc.expiryDate), 'dd/MM/yyyy') : 'N/A'}</p>
                 </div>
                 <button 
                   onClick={() => onRenew(doc)}
