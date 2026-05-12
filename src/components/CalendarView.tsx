@@ -91,9 +91,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   "VERSION:2.0",
                   ...documents.map(d => [
                     "BEGIN:VEVENT",
-                    `SUMMARY:Expiry: ${d.title}`,
-                    `DTSTART;VALUE=DATE:${d.expiryDate.replace(/-/g, '')}`,
-                    `DESCRIPTION:Document ${d.title} is expiring.`,
+                    `SUMMARY:Expiry: ${(d.title || '').replace(/[\r\n]/g, ' ')}`,
+                    `DTSTART;VALUE=DATE:${(d.expiryDate || '').replace(/-/g, '')}`,
+                    `DESCRIPTION:Document ${(d.title || '').replace(/[\r\n]/g, ' ')} is expiring.`,
                     "END:VEVENT"
                   ].join("\n")),
                   "END:VCALENDAR"
