@@ -642,19 +642,19 @@ export default function App() {
   // Optimized stats and filtering
   const stats = useMemo(() => ({
     total: documents.length,
+    // FIXED: Renewed docs ALWAYS counted as safe (user manually renewed = safe)
+    // This ensures safe + expiring + expired = total (no ghost docs)
     safe: documents.filter(d => {
-      const computed = getStatus(d.expiryDate);
-      // Renewed counts as safe only if not actually expired
-      if (d.status === 'Renewed' && computed !== 'Expired') return true;
-      return computed === 'Safe';
+      if (d.status === 'Renewed') return true; // Renewed = always safe
+      return getStatus(d.expiryDate) === 'Safe';
     }).length,
     expiring: documents.filter(d => {
-      const computed = getStatus(d.expiryDate);
-      return computed === 'Expiring Soon' && d.status !== 'Renewed';
+      if (d.status === 'Renewed') return false; // Renewed never expiring
+      return getStatus(d.expiryDate) === 'Expiring Soon';
     }).length,
     expired: documents.filter(d => {
-      const computed = getStatus(d.expiryDate);
-      return computed === 'Expired' && d.status !== 'Renewed';
+      if (d.status === 'Renewed') return false; // Renewed never expired
+      return getStatus(d.expiryDate) === 'Expired';
     }).length,
   }), [documents, getStatus]);
 
