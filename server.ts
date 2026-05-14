@@ -1455,6 +1455,15 @@ https://ai-doc-expiry-tracker.onrender.com`;
 
     // Send Full Status Report
     app.post("/api/notifications/send-report", async (req, res) => {
+      // Set 55s timeout — SMTP can take up to 20s, give buffer before Render's 60s hard limit
+      req.socket.setTimeout(55000);
+      res.setTimeout(55000, () => {
+        if (!res.headersSent) {
+          console.error("[Report] Request timed out after 55s");
+          res.status(504).json({ error: "Report generation timed out. Please try again." });
+        }
+      });
+
       const { userId, email } = req.body;
       const authHeader = req.headers.authorization;
       const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
@@ -1561,10 +1570,12 @@ https://ai-doc-expiry-tracker.onrender.com`;
         `
       });
 
-      res.json({ success: true });
+      if (!res.headersSent) res.json({ success: true });
     } catch (error: any) {
-      console.error("Report Error:", error);
-      res.status(500).json({ error: "Failed to send report", details: error.message });
+      console.error("[Report] Error:", error.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to send report", details: error.message });
+      }
     }
   });
 
