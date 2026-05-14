@@ -183,8 +183,8 @@ export default function App() {
     if (!user || !phoneToUse) return;
     setIsSendingWhatsAppReport(true);
     try {
-      const token = await user.getIdToken(true).catch(() => null);
-      if (!token) { setError("Authentication error. Please refresh."); setIsSendingWhatsAppReport(false); return; }
+      const token = await auth.currentUser?.getIdToken(true) ?? null;
+      if (!token) { setError("Authentication error. Please refresh and try again."); setIsSendingWhatsAppReport(false); return; }
       const res = await fetch("/api/notifications/whatsapp", {
         method: "POST",
         headers: { 
@@ -217,7 +217,7 @@ export default function App() {
     }
     setIsSendingReport(true);
     try {
-      const token = await user.getIdToken(true).catch(() => null);
+      const token = await auth.currentUser?.getIdToken(true) ?? null;
       if (!token) { alert("Authentication error. Please refresh and try again."); setIsSendingReport(false); return; }
       const response = await fetch("/api/notifications/send-report", {
         method: "POST",
@@ -252,7 +252,7 @@ export default function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${await user.getIdToken()}`
+          "Authorization": `Bearer ${await (auth.currentUser?.getIdToken() ?? Promise.resolve(""))}`
         },
         body: JSON.stringify({
           userId: user.uid,
@@ -278,7 +278,7 @@ export default function App() {
     setIsTriggeringReminders(true);
     try {
       if (!user) { setIsTriggeringReminders(false); return; }
-      const token = await user.getIdToken(true).catch(() => null);
+      const token = await auth.currentUser?.getIdToken(true) ?? null;
       if (!token) { setIsTriggeringReminders(false); return; }
       const response = await fetch("/api/notifications/trigger-reminders", {
         method: "POST",
@@ -428,7 +428,9 @@ export default function App() {
 
       if (response.ok) {
         // Force state update to reflect new profile info
-        setUser(prev => prev ? { ...prev, displayName: data.displayName, photoURL: finalPhotoURL } : null);
+        // CRITICAL FIX: Never spread a Firebase User — it destroys prototype methods (getIdToken etc.)
+        // auth.currentUser is already updated by updateProfile() above — just sync React state
+        if (auth.currentUser) setUser(auth.currentUser);
         alert("Account settings saved successfully!");
       } else {
         alert("Failed to save account settings.");
@@ -959,7 +961,7 @@ Track your document expiry dates with AI.
       }
 
       // Email via server
-      const inviteToken = await user.getIdToken();
+      const inviteToken = await auth.currentUser?.getIdToken() ?? "";
       const response = await fetch("/api/invites/send", {
         method: "POST",
         headers: { 
@@ -1138,7 +1140,7 @@ Track your document expiry dates with AI.
                 }
                 setIsSendingEmail(true);
                 try {
-                  const testEmailToken = await user.getIdToken();
+                  const testEmailToken = await auth.currentUser?.getIdToken() ?? "";
                   const response = await fetch("/api/notifications/send-email", {
                     method: "POST",
                     headers: { 
@@ -1176,7 +1178,7 @@ Track your document expiry dates with AI.
               onSaveUpiSettings={async () => {
                 setIsSavingUpi(true);
                 try {
-                  const token = await user?.getIdToken();
+                  const token = await auth.currentUser?.getIdToken() ?? "";
                   const response = await fetch("/api/config/upi", {
                     method: "POST",
                     headers: {
@@ -1736,12 +1738,36 @@ Track your document expiry dates with AI.
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-8 bg-gray-100 flex items-center justify-center">
-                {selectedDoc.fileUrl || selectedDoc.fileData ? (
+                {selectedDoc.fileData ? (
+                  // Local base64 image — always works, no CORS needed
                   <img 
-                    src={selectedDoc.fileUrl || `data:image/jpeg;base64,${selectedDoc.fileData}`} 
+                    src={`data:image/jpeg;base64,${selectedDoc.fileData}`}
                     alt={selectedDoc.title} 
                     className="max-w-full h-auto rounded-lg shadow-lg" 
                   />
+                ) : selectedDoc.fileUrl ? (
+                  // Cloud Storage URL — show with download fallback
+                  <div className="text-center space-y-3">
+                    <img 
+                      src={selectedDoc.fileUrl}
+                      alt={selectedDoc.title} 
+                      className="max-w-full h-auto rounded-lg shadow-lg"
+                      onError={(e) => { 
+                        // If image fails (CORS), hide img and show download link
+                        (e.target as HTMLImageElement).style.display = 'none';
+                        document.getElementById(`dl-${selectedDoc.id}`)?.classList.remove('hidden');
+                      }}
+                    />
+                    <a 
+                      id={`dl-${selectedDoc.id}`}
+                      href={selectedDoc.fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="hidden inline-block px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                    >
+                      📎 Open Document
+                    </a>
+                  </div>
                 ) : (
                   <div className="text-center space-y-4 text-gray-400">
                     <FileText size={64} className="mx-auto" />
