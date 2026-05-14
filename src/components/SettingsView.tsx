@@ -589,6 +589,20 @@ My issue: `)}`}
                             href={doc.fileUrl || `data:image/jpeg;base64,${doc.fileData}`}
                             target="_blank"
                             rel="noreferrer"
+                            onClick={(e) => {
+                              if (doc.fileData && !doc.fileUrl) {
+                                e.preventDefault();
+                                try {
+                                  const b = atob(doc.fileData);
+                                  const arr = new Uint8Array(b.length);
+                                  for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i);
+                                  const blob = new Blob([arr], { type: 'image/jpeg' });
+                                  const url = URL.createObjectURL(blob);
+                                  const w = window.open(url, '_blank');
+                                  if (w) setTimeout(() => URL.revokeObjectURL(url), 15000);
+                                } catch { alert('Could not open image preview.'); }
+                              }
+                            }}
                             className="text-blue-600 hover:underline"
                           >View</a>
                         )}
