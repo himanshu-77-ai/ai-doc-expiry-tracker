@@ -640,23 +640,27 @@ export default function App() {
   };
 
   // Optimized stats and filtering
-  const stats = useMemo(() => ({
-    total: documents.length,
-    // FIXED: Renewed docs ALWAYS counted as safe (user manually renewed = safe)
-    // This ensures safe + expiring + expired = total (no ghost docs)
-    safe: documents.filter(d => {
-      if (d.status === 'Renewed') return true; // Renewed = always safe
-      return getStatus(d.expiryDate) === 'Safe';
-    }).length,
-    expiring: documents.filter(d => {
-      if (d.status === 'Renewed') return false; // Renewed never expiring
-      return getStatus(d.expiryDate) === 'Expiring Soon';
-    }).length,
-    expired: documents.filter(d => {
-      if (d.status === 'Renewed') return false; // Renewed never expired
-      return getStatus(d.expiryDate) === 'Expired';
-    }).length,
-  }), [documents, getStatus]);
+  // ── CATEGORIZATION RULES (strict priority, no overlaps) ─────────────────────
+  // Priority: Renewed > Expired > Expiring Soon > Safe
+  // A doc belongs to exactly ONE category. safe+expiring+expired ALWAYS = total.
+  const categorizeDoc = useCallback((d: Document) => {
+    if (d.status === 'Renewed') return 'renewed';   // User manually renewed → always "safe" bucket
+    const computed = getStatus(d.expiryDate);
+    if (computed === 'Expired') return 'expired';
+    if (computed === 'Expiring Soon') return 'expiring';
+    return 'safe';
+  }, [getStatus]);
+
+  const stats = useMemo(() => {
+    const counts = { safe: 0, expiring: 0, expired: 0, renewed: 0 };
+    documents.forEach(d => { counts[categorizeDoc(d) as keyof typeof counts]++; });
+    return {
+      total: documents.length,
+      safe: counts.safe + counts.renewed, // Renewed shown in "Secured & Active"
+      expiring: counts.expiring,
+      expired: counts.expired,
+    };
+  }, [documents, categorizeDoc]);
 
   // ── Component-level plan & limit (used by Header + handleSaveDocument) ──
   const docLimit = getEffectiveDocLimit(userData);
@@ -1074,7 +1078,10 @@ Track your document expiry dates with AI.
           {activeTab === "dashboard" && (
             <DashboardView 
               stats={stats}
-              upcomingDocuments={documents.filter(d => getStatus(d.expiryDate) !== 'Safe' && d.status !== 'Renewed')}
+              upcomingDocuments={documents.filter(d => {
+                const cat = categorizeDoc(d);
+                return cat === 'expiring' || cat === 'expired';
+              })}
               onScanClick={() => setIsUploadModalOpen(true)}
               onRenew={handleRenew}
               getStatus={getStatus}
@@ -1210,7 +1217,17 @@ Track your document expiry dates with AI.
               isSendingWhatsAppReport={isSendingWhatsAppReport}
               onSendWhatsAppReport={onSendWhatsAppReport}
               isSavingProfile={isSavingProfile}
-              recentDocuments={documents}
+              recentDocuments={[...documents].sort((a, b) => {
+                // Most recent first — null createdAt (pending server timestamp) = newest
+                const getTime = (d: Document) => {
+                  if (!d.createdAt) return Number.MAX_SAFE_INTEGER; // null = just added = top
+                  if (d.createdAt?.seconds) return d.createdAt.seconds * 1000;
+                  if (d.createdAt instanceof Date) return d.createdAt.getTime();
+                  if (typeof d.createdAt === 'string') return new Date(d.createdAt).getTime();
+                  return 0;
+                };
+                return getTime(b) - getTime(a);
+              }).slice(0, 10)}
               isTestingStorage={isTestingStorage}
               onTestStorage={async () => {
                 if (!user) return;
@@ -1373,31 +1390,35 @@ Track your document expiry dates with AI.
             return;
           }
 
-          // ── DUPLICATE DOCUMENT CHECK (title+date + docNumber) ──
-          const dupByDocNumber = (data.documentNumber && data.documentNumber.trim())
+          // ── DUPLICATE DETECTION ─────────────────────────────────────────────
+          // Rule 1: Same document number + same category = duplicate
+          const dupByDocNumber = data.documentNumber?.trim()
             ? documents.find(d =>
-                d.documentNumber &&
-                d.documentNumber.trim().toLowerCase() === data.documentNumber.trim().toLowerCase() &&
+                d.documentNumber?.trim().toLowerCase() === data.documentNumber.trim().toLowerCase() &&
                 d.category === data.category
               )
             : null;
-          const dupByTitleDate = documents.find(d =>
+          // Rule 2: Same title + same category = duplicate (even if dates differ)
+          // This catches "005" added twice under "Other" with different dates
+          const dupByTitle = documents.find(d =>
             d.title.trim().toLowerCase() === data.title.trim().toLowerCase() &&
-            d.expiryDate === data.expiryDate
+            d.category === data.category
           );
-          const duplicateDoc = dupByDocNumber || dupByTitleDate;
+          const duplicateDoc = dupByDocNumber || dupByTitle;
           if (duplicateDoc) {
             const reason = dupByDocNumber
-              ? `document number "${data.documentNumber}" in the "${data.category}" category`
-              : `same title and expiry date (${data.expiryDate})`;
-            const confirmDup = window.confirm(
-              `⚠️ Duplicate Document Detected\n\n` +
-              `"${duplicateDoc.title}" already exists with the ${reason}.\n\n` +
-              `Click OK to save anyway, or Cancel to go back and review.`
+              ? `Document number "${data.documentNumber}" already exists in "${data.category}" category`
+              : `"${duplicateDoc.title}" already exists in "${data.category}" category`;
+            const proceed = window.confirm(
+              `⚠️ Duplicate Document Detected
+
+${reason}.
+
+Do you want to save it anyway?`
             );
-            if (!confirmDup) return;
+            if (!proceed) return;
           }
-          // ─────────────────────────────
+          // ──────────────────────────────────────────────────────────────────────
 
           setIsSavingDoc(true);
           setSaveStage('preparing');
@@ -1650,6 +1671,26 @@ Track your document expiry dates with AI.
                     documentNumber: formData.get('documentNumber') as string,
                     status: getStatus(formData.get('expiryDate') as string),
                   };
+                  // Duplicate check on edit — exclude current doc being edited
+                  const otherDocs = documents.filter(d => d.id !== docToEdit.id);
+                  const editDupByNum = data.documentNumber?.trim()
+                    ? otherDocs.find(d =>
+                        d.documentNumber?.trim().toLowerCase() === data.documentNumber.trim().toLowerCase() &&
+                        d.category === data.category)
+                    : null;
+                  // Same title + same category = duplicate (consistent with add flow)
+                  const editDupByTitle = otherDocs.find(d =>
+                    d.title.trim().toLowerCase() === data.title.trim().toLowerCase() &&
+                    d.category === data.category);
+                  const editDup = editDupByNum || editDupByTitle;
+                  if (editDup) {
+                    const reason = editDupByNum
+                      ? `Document number "${data.documentNumber}" already exists in "${data.category}"`
+                      : `"${editDup.title}" already exists in "${data.category}" category`;
+                    if (!window.confirm(`⚠️ Duplicate: ${reason}.
+
+Save anyway?`)) return;
+                  }
                   await updateDocument(docToEdit.id, data);
                 }} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
